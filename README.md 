@@ -1,0 +1,387 @@
+# Wish Listy Backend API
+
+A complete RESTful API for the Wish Listy mobile application built with Node.js, Express, and MongoDB.
+
+## Features
+
+- ✅ Phone number authentication with OTP (Twilio)
+- ✅ User registration and profile management
+- ✅ Create and manage wishlists (Public/Private/Friends Only)
+- ✅ Add/Update/Delete wishlist items
+- ✅ Mark items as purchased
+- ✅ Category-based wishlists
+- ✅ JWT-based authentication
+- ✅ MongoDB for data persistence
+
+## Tech Stack
+
+- **Node.js** - Runtime environment
+- **Express.js** - Web framework
+- **MongoDB** - Database
+- **Mongoose** - ODM
+- **JWT** - Authentication
+- **Twilio** - SMS/OTP service
+- **bcryptjs** - Password hashing
+
+## Prerequisites
+
+- Node.js (v14 or higher)
+- MongoDB (local or Atlas)
+- Twilio account (for SMS OTP)
+
+## Installation
+
+1. **Clone the repository**
+```bash
+git clone <your-repo-url>
+cd wish-listy-backend
+```
+
+2. **Install dependencies**
+```bash
+npm install
+```
+
+3. **Set up environment variables**
+
+Create a `.env` file in the root directory and add:
+
+```env
+# Server
+NODE_ENV=development
+PORT=5000
+
+# Database
+MONGODB_URI=mongodb://localhost:27017/wish-listy
+
+# JWT
+JWT_SECRET=your_super_secret_jwt_key_change_this_in_production
+JWT_EXPIRE=7d
+
+# Twilio (for SMS OTP)
+TWILIO_ACCOUNT_SID=your_twilio_account_sid
+TWILIO_AUTH_TOKEN=your_twilio_auth_token
+TWILIO_PHONE_NUMBER=your_twilio_phone_number
+
+# OTP Settings
+OTP_EXPIRY_MINUTES=10
+```
+
+4. **Set up Twilio**
+   - Sign up at [twilio.com](https://www.twilio.com)
+   - Get your Account SID, Auth Token, and Phone Number
+   - Add them to your `.env` file
+
+5. **Start MongoDB**
+```bash
+# If using local MongoDB
+mongod
+
+# Or use MongoDB Atlas (cloud)
+```
+
+6. **Run the application**
+```bash
+# Development mode
+npm run dev
+
+# Production mode
+npm start
+```
+
+The server will start on `http://localhost:5000`
+
+## API Endpoints
+
+### Authentication
+
+#### Send OTP
+```http
+POST /api/auth/send-otp
+Content-Type: application/json
+
+{
+  "phoneNumber": "+1234567890"
+}
+```
+
+#### Verify OTP & Login
+```http
+POST /api/auth/verify-otp
+Content-Type: application/json
+
+{
+  "phoneNumber": "+1234567890",
+  "otp": "123456"
+}
+```
+
+#### Register New User
+```http
+POST /api/auth/register
+Content-Type: application/json
+
+{
+  "fullName": "John Doe",
+  "phoneNumber": "+1234567890",
+  "email": "john@example.com"
+}
+```
+
+#### Get Current User
+```http
+GET /api/auth/me
+Authorization: Bearer <token>
+```
+
+### Wishlists
+
+#### Create Wishlist
+```http
+POST /api/wishlists
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "name": "My Birthday Wishlist",
+  "description": "Things I want for my birthday",
+  "privacy": "public",
+  "category": "birthday"
+}
+```
+
+#### Get My Wishlists
+```http
+GET /api/wishlists
+Authorization: Bearer <token>
+```
+
+#### Get Wishlist by ID
+```http
+GET /api/wishlists/:id
+Authorization: Bearer <token>
+```
+
+#### Update Wishlist
+```http
+PUT /api/wishlists/:id
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "name": "Updated Name",
+  "privacy": "private"
+}
+```
+
+#### Delete Wishlist
+```http
+DELETE /api/wishlists/:id
+Authorization: Bearer <token>
+```
+
+### Items
+
+#### Add Item to Wishlist
+```http
+POST /api/items
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "name": "iPhone 15 Pro",
+  "description": "Latest iPhone",
+  "price": 999,
+  "url": "https://apple.com",
+  "priority": "high",
+  "wishlistId": "60f7b3b3b3b3b3b3b3b3b3b3"
+}
+```
+
+#### Get Items in Wishlist
+```http
+GET /api/items/wishlist/:wishlistId
+Authorization: Bearer <token>
+```
+
+#### Update Item
+```http
+PUT /api/items/:id
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "name": "Updated Item Name",
+  "price": 899
+}
+```
+
+#### Mark Item as Purchased
+```http
+PUT /api/items/:id/purchase
+Authorization: Bearer <token>
+```
+
+#### Delete Item
+```http
+DELETE /api/items/:id
+Authorization: Bearer <token>
+```
+
+## Project Structure
+
+```
+wish-listy-backend/
+├── src/
+│   ├── config/
+│   │   ├── database.js       # MongoDB connection
+│   │   └── twilio.js         # Twilio configuration
+│   ├── models/
+│   │   ├── User.js           # User model
+│   │   ├── Wishlist.js       # Wishlist model
+│   │   ├── Item.js           # Item model
+│   │   └── OTP.js            # OTP model
+│   ├── controllers/
+│   │   ├── authController.js     # Auth logic
+│   │   ├── wishlistController.js # Wishlist logic
+│   │   └── itemController.js     # Item logic
+│   ├── routes/
+│   │   ├── authRoutes.js
+│   │   ├── wishlistRoutes.js
+│   │   └── itemRoutes.js
+│   ├── middleware/
+│   │   ├── auth.js           # JWT verification
+│   │   └── errorHandler.js   # Error handling
+│   ├── utils/
+│   │   ├── sms.js            # SMS utilities
+│   │   └── jwt.js            # JWT utilities
+│   ├── app.js                # Express app
+│   └── server.js             # Server entry point
+├── .env                      # Environment variables
+├── .gitignore
+├── package.json
+└── README.md
+```
+
+## Data Models
+
+### User
+- fullName
+- phoneNumber (unique)
+- email
+- profileImage
+- isVerified
+- friends[]
+- createdAt
+- updatedAt
+
+### Wishlist
+- name
+- description
+- owner (User reference)
+- privacy (public/private/friends)
+- category (general/birthday/wedding/etc.)
+- items[] (Item references)
+- sharedWith[] (User references)
+- createdAt
+- updatedAt
+
+### Item
+- name
+- description
+- price
+- url
+- image
+- isPurchased
+- purchasedBy (User reference)
+- purchasedAt
+- wishlist (Wishlist reference)
+- priority (low/medium/high)
+- createdAt
+- updatedAt
+
+## Privacy Levels
+
+- **Public**: Anyone can see and join
+- **Private**: Only invited guests can see
+- **Friends Only**: Only your friends can see
+
+## Categories
+
+- General
+- Birthday
+- Wedding
+- Graduation
+- Anniversary
+- Holiday
+
+## Development Tips
+
+1. **Testing with Postman**
+   - Import the API endpoints
+   - Set up environment variables for the token
+   - Test each endpoint
+
+2. **MongoDB**
+   - Use MongoDB Compass for GUI
+   - Or use mongo shell for CLI
+
+3. **Twilio Testing**
+   - Use Twilio test credentials for development
+   - Or skip SMS and log OTP to console in dev mode
+
+## Deployment
+
+### Heroku
+```bash
+heroku create wish-listy-api
+heroku config:set NODE_ENV=production
+heroku config:set MONGODB_URI=<your-mongodb-uri>
+git push heroku main
+```
+
+### Render / Railway
+- Connect your GitHub repo
+- Set environment variables
+- Deploy
+
+## Security Notes
+
+- Always use HTTPS in production
+- Keep JWT_SECRET secure
+- Use environment variables for all secrets
+- Implement rate limiting for OTP requests
+- Add input validation and sanitization
+- Use helmet for security headers
+
+## Future Enhancements
+
+- [ ] Friend request system
+- [ ] Wishlist sharing via link
+- [ ] Email notifications
+- [ ] Item image upload
+- [ ] Search functionality
+- [ ] Social features (comments, likes)
+- [ ] Gift recommendations
+- [ ] Multiple currencies support
+- [ ] Event reminders
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Open a Pull Request
+
+## License
+
+MIT License
+
+## Support
+
+For issues and questions, please open an issue on GitHub.
+
+---
+
+Built with ❤️ for Wish Listy

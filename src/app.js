@@ -1,0 +1,39 @@
+const express = require('express');
+const cors = require('cors');
+const helmet = require('helmet');
+const morgan = require('morgan');
+const errorHandler = require('./middleware/errorHandler');
+
+const authRoutes = require('./routes/authRoutes');
+const wishlistRoutes = require('./routes/wishlistRoutes');
+const itemRoutes = require('./routes/itemRoutes');
+
+const app = express();
+
+// Middleware
+app.use(helmet());
+app.use(cors());
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+if (process.env.NODE_ENV === 'development') {
+  app.use(morgan('dev'));
+}
+
+// Routes
+app.get('/', (req, res) => {
+  res.json({
+    success: true,
+    message: 'Wish Listy API is running',
+    version: '1.0.0'
+  });
+});
+
+app.use('/api/auth', authRoutes);
+app.use('/api/wishlists', wishlistRoutes);
+app.use('/api/items', itemRoutes);
+
+// Error Handler
+app.use(errorHandler);
+
+module.exports = app;
