@@ -1,6 +1,6 @@
 require('dotenv').config();
-const app = require('./app');
-const connectDB = require('./config/database');
+const app = require('./src/app');
+const connectDB = require('./src/config/database'); // Updated path
 
 const PORT = process.env.PORT || 5000;
 

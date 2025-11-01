@@ -10,7 +10,11 @@
     "build": "npm install --omit=dev",
     "seed": "node scripts/seed.js"
   },
-  "keywords": ["wishlist", "gift", "social"],
+  "keywords": [
+    "wishlist",
+    "gift",
+    "social"
+  ],
   "author": "Ibrahim omar",
   "license": "ISC",
   "type": "commonjs",

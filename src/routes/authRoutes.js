@@ -1,11 +1,14 @@
 const express = require('express');
 const router = express.Router();
-const { sendOTPCode, verifyOTPAndLogin, register, getMe } = require('../controllers/authController');
+const authController = require('../controllers/authController');
 const { protect } = require('../middleware/auth');
 
-router.post('/send-otp', sendOTPCode);
-router.post('/verify-otp', verifyOTPAndLogin);
-router.post('/register', register);
-router.get('/me', protect, getMe);
+// Remove OTP routes if not implemented
+// router.post('/send-otp', authController.sendOTPCode);
+// router.post('/verify-otp', authController.verifyOTPAndLogin);
+
+router.post('/register', authController.register);
+router.post('/login', authController.verifyPasswordAndLogin);
+router.get('/me', protect, authController.getMe);
 
 module.exports = router;

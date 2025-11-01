@@ -1,5 +1,5 @@
 const mongoose = require('mongoose');
-const bcrypt = require('bcryptjs');
+const bcrypt = require('bcryptjs'); // Ensure bcrypt is imported correctly
 
 const userSchema = new mongoose.Schema({
   fullName: {
@@ -11,7 +11,7 @@ const userSchema = new mongoose.Schema({
     type: String,
     required: [true, 'Phone number is required'],
     unique: true,
-    match: [/^\+?[1-9]\d{1,14}$/, 'Please provide a valid phone number']
+    match: [/^(?:\+?[1-9]\d{1,14}|0\d{9,10})$/, 'Please provide a valid phone number']
   },
   email: {
     type: String,
@@ -45,5 +45,10 @@ userSchema.pre('save', function(next) {
   this.updatedAt = Date.now();
   next();
 });
+
+// Method to compare passwords
+userSchema.methods.comparePassword = async function(candidatePassword) {
+  return await bcrypt.compare(candidatePassword, this.password); // Assuming password is hashed and stored
+};
 
 module.exports = mongoose.model('User', userSchema);
