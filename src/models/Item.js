@@ -51,10 +51,8 @@ const itemSchema = new mongoose.Schema({
     default: Date.now
   }
 });
-
 itemSchema.pre('save', function(next) {
   this.updatedAt = Date.now();
   next();
 });
-
 module.exports = mongoose.model('Item', itemSchema);
