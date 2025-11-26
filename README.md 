@@ -115,10 +115,10 @@ Content-Type: application/json
   "otp": "123456"
 }
 ```
-
+https://wishlisty-backend-api.vercel.app/
 #### Register New User
 ```http
-POST /api/auth/register
+POST https://wishlisty-backend-api.vercel.app//api/auth/register
 Content-Type: application/json
 
 {
