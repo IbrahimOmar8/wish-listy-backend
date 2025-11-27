@@ -1,14 +1,15 @@
 const mongoose = require('mongoose');
 
-// Set default MONGODB_URI if undefined
-process.env.MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/defaultDB';
+// Debug: Check all environment variables
+console.log('🔍 DEBUG - process.env.MONGODB_URI:', process.env.MONGODB_URI);
+console.log('🔍 DEBUG - All env keys:', Object.keys(process.env).filter(key => key.includes('MONGO')));
 
-if (process.env.MONGODB_URI) {
-  console.log('🌐 Connecting to MongoDB...' + process.env.MONGODB_URI);
-} else {
+if (!process.env.MONGODB_URI) {
   console.error('❌ MongoDB URI is undefined. Please check your .env file.');
-  process.exit(1); // Exit if the MongoDB URI is not defined
+  process.exit(1);
 }
+
+console.log('🌐 Connecting to MongoDB...' + process.env.MONGODB_URI);
 
 const connectDB = async () => {
   try {
