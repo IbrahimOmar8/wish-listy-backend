@@ -1,5 +1,5 @@
 const mongoose = require('mongoose');
-const bcrypt = require('bcryptjs'); // Ensure bcrypt is imported correctly
+const bcrypt = require('bcryptjs');
 
 const userSchema = new mongoose.Schema({
   fullName: {
@@ -7,17 +7,20 @@ const userSchema = new mongoose.Schema({
     required: [true, 'Full name is required'],
     trim: true
   },
-  phoneNumber: {
+  username: {
     type: String,
-    required: [true, 'Phone number is required'],
+    required: [true, 'Username is required'],
     unique: true,
-    match: [/^(?:\+?[1-9]\d{1,14}|0\d{9,10})$/, 'Please provide a valid phone number']
-  },
-  email: {
-    type: String,
     trim: true,
     lowercase: true,
-    match: [/^\S+@\S+\.\S+$/, 'Please provide a valid email']
+    minlength: [3, 'Username must be at least 3 characters long'],
+    match: [/^[a-zA-Z0-9_-]+$/, 'Username can only contain letters, numbers, underscores, and hyphens']
+  },
+  password: {
+    type: String,
+    required: [true, 'Password is required'],
+    minlength: [6, 'Password must be at least 6 characters long'],
+    select: false
   },
   profileImage: {
     type: String,
@@ -48,7 +51,7 @@ userSchema.pre('save', function(next) {
 
 // Method to compare passwords
 userSchema.methods.comparePassword = async function(candidatePassword) {
-  return await bcrypt.compare(candidatePassword, this.password); // Assuming password is hashed and stored
+  return await bcrypt.compare(candidatePassword, this.password);
 };
 
 module.exports = mongoose.model('User', userSchema);

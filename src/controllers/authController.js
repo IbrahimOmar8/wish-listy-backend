@@ -1,6 +1,6 @@
 const User = require('../models/User');
 const { generateToken } = require('../utils/jwt');
-const bcrypt = require('bcryptjs'); // Ensure bcrypt is imported correctly
+const bcrypt = require('bcryptjs');
 
 exports.sendPasswordResetLink = async (req, res) => {
   // Logic to send password reset link (if needed)
@@ -8,17 +8,17 @@ exports.sendPasswordResetLink = async (req, res) => {
 
 exports.verifyPasswordAndLogin = async (req, res) => {
   try {
-    const { phoneNumber, password } = req.body;
+    const { username, password } = req.body;
 
-    if (!phoneNumber || !password) {
+    if (!username || !password) {
       return res.status(400).json({
         success: false,
-        message: 'Phone number and password are required'
+        message: 'Username and password are required'
       });
     }
 
-    // Find user by phone number
-    const user = await User.findOne({ phoneNumber });
+    // Find user by username
+    const user = await User.findOne({ username }).select('+password');
 
     if (!user) {
       return res.status(400).json({
@@ -28,7 +28,7 @@ exports.verifyPasswordAndLogin = async (req, res) => {
     }
 
     // Verify password
-    const isMatch = await user.comparePassword(password); // Assuming comparePassword method is defined in User model
+    const isMatch = await user.comparePassword(password);
 
     if (!isMatch) {
       return res.status(400).json({
@@ -45,8 +45,7 @@ exports.verifyPasswordAndLogin = async (req, res) => {
       user: {
         id: user._id,
         fullName: user.fullName,
-        phoneNumber: user.phoneNumber,
-        email: user.email,
+        username: user.username,
         profileImage: user.profileImage
       }
     });
@@ -61,22 +60,22 @@ exports.verifyPasswordAndLogin = async (req, res) => {
 
 exports.register = async (req, res) => {
   try {
-    const { fullName, phoneNumber, email, password } = req.body;
+    const { fullName, username, password } = req.body;
 
-    if (!fullName || !phoneNumber || !password) {
+    if (!fullName || !username || !password) {
       return res.status(400).json({
         success: false,
-        message: 'Full name, phone number, and password are required'
+        message: 'Full name, username, and password are required'
       });
     }
 
     // Check if user already exists
-    const existingUser = await User.findOne({ phoneNumber });
+    const existingUser = await User.findOne({ username });
 
     if (existingUser) {
       return res.status(400).json({
         success: false,
-        message: 'User already exists'
+        message: 'Username already exists'
       });
     }
 
@@ -94,9 +93,8 @@ exports.register = async (req, res) => {
     // Create new user
     const user = await User.create({
       fullName,
-      phoneNumber,
-      email,
-      password: hashedPassword, // Save hashed password
+      username,
+      password: hashedPassword,
       isVerified: true
     });
 
@@ -108,8 +106,7 @@ exports.register = async (req, res) => {
       user: {
         id: user._id,
         fullName: user.fullName,
-        phoneNumber: user.phoneNumber,
-        email: user.email
+        username: user.username
       }
     });
   } catch (error) {

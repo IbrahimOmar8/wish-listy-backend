@@ -4,7 +4,7 @@ A complete RESTful API for the Wish Listy mobile application built with Node.js,
 
 ## Features
 
-- ✅ User registration and login with password
+- ✅ User registration and login with username and password
 - ✅ User profile management
 - ✅ Create and manage wishlists (Public/Private/Friends Only)
 - ✅ Add/Update/Delete wishlist items
@@ -88,8 +88,7 @@ Content-Type: application/json
 
 {
   "fullName": "John Doe",
-  "phoneNumber": "+1234567890",
-  "email": "john@example.com",
+  "username": "johndoe",
   "password": "securePassword123"
 }
 ```
@@ -102,11 +101,17 @@ Content-Type: application/json
   "user": {
     "id": "60f7b3b3b3b3b3b3b3b3b3b3",
     "fullName": "John Doe",
-    "phoneNumber": "+1234567890",
-    "email": "john@example.com"
+    "username": "johndoe"
   }
 }
 ```
+
+**Validation:**
+- `fullName`: Required, min 1 character
+- `username`: Required, min 3 characters, unique, alphanumeric with underscores and hyphens
+- `password`: Required, min 6 characters
+
+---
 
 #### Login
 ```http
@@ -114,7 +119,7 @@ POST /api/auth/login
 Content-Type: application/json
 
 {
-  "phoneNumber": "+1234567890",
+  "username": "johndoe",
   "password": "securePassword123"
 }
 ```
@@ -127,12 +132,27 @@ Content-Type: application/json
   "user": {
     "id": "60f7b3b3b3b3b3b3b3b3b3b3",
     "fullName": "John Doe",
-    "phoneNumber": "+1234567890",
-    "email": "john@example.com",
+    "username": "johndoe",
     "profileImage": null
   }
 }
 ```
+
+**Error Responses:**
+```json
+{
+  "success": false,
+  "message": "User not found"
+}
+```
+```json
+{
+  "success": false,
+  "message": "Invalid password"
+}
+```
+
+---
 
 #### Get Current User
 ```http
@@ -147,14 +167,17 @@ Authorization: Bearer <token>
   "user": {
     "_id": "60f7b3b3b3b3b3b3b3b3b3b3",
     "fullName": "John Doe",
-    "phoneNumber": "+1234567890",
-    "email": "john@example.com",
+    "username": "johndoe",
     "profileImage": null,
     "isVerified": true,
-    "createdAt": "2024-01-15T10:30:00.000Z"
+    "friends": [],
+    "createdAt": "2024-01-15T10:30:00.000Z",
+    "updatedAt": "2024-01-15T10:30:00.000Z"
   }
 }
 ```
+
+---
 
 ### Wishlists
 
@@ -201,6 +224,8 @@ Content-Type: application/json
 DELETE /api/wishlists/:id
 Authorization: Bearer <token>
 ```
+
+---
 
 ### Items
 
@@ -250,6 +275,8 @@ DELETE /api/items/:id
 Authorization: Bearer <token>
 ```
 
+---
+
 ## Project Structure
 
 ```
@@ -282,6 +309,21 @@ wish-listy-backend/
 └── README.md
 ```
 
+## Authentication
+
+This API uses JWT (JSON Web Tokens) for authentication.
+
+**How to use:**
+1. Register or login to get a token
+2. Include the token in the `Authorization` header for protected routes
+3. Format: `Authorization: Bearer <your_token_here>`
+
+**Token Details:**
+- Expires in 7 days
+- Secret key stored in `JWT_SECRET` environment variable
+
+---
+
 ## Error Handling
 
 All endpoints return errors in the following format:
@@ -293,13 +335,33 @@ All endpoints return errors in the following format:
 }
 ```
 
-Common HTTP Status Codes:
+**Common HTTP Status Codes:**
 - `200` - OK
 - `201` - Created
-- `400` - Bad Request
-- `401` - Unauthorized
+- `400` - Bad Request (validation error)
+- `401` - Unauthorized (missing or invalid token)
 - `404` - Not Found
 - `500` - Server Error
+
+---
+
+## User Model
+
+```javascript
+{
+  _id: ObjectId,
+  fullName: String (required),
+  username: String (required, unique, 3+ chars),
+  password: String (required, 6+ chars, hashed),
+  profileImage: String (optional),
+  isVerified: Boolean (default: false),
+  friends: [ObjectId],
+  createdAt: Date,
+  updatedAt: Date
+}
+```
+
+---
 
 ## Security Notes
 
@@ -309,7 +371,10 @@ Common HTTP Status Codes:
 - Implement rate limiting for login attempts
 - Add input validation and sanitization
 - Use helmet for security headers
-- Hash passwords with bcryptjs before storing
+- Passwords are hashed with bcryptjs (10 salt rounds)
+- Password field is excluded from default queries (`select: false`)
+
+---
 
 ## Development Tips
 
@@ -325,6 +390,9 @@ Common HTTP Status Codes:
 3. **JWT Token**
    - Token expires in 7 days by default
    - Include token in Authorization header: `Bearer <token>`
+   - Token contains user ID for authorization
+
+---
 
 ## Deployment
 
@@ -337,6 +405,8 @@ heroku config:set JWT_SECRET=<your-secret>
 git push heroku main
 ```
 
+---
+
 ## Contributing
 
 1. Fork the repository
@@ -345,9 +415,13 @@ git push heroku main
 4. Push to the branch
 5. Open a Pull Request
 
+---
+
 ## License
 
 MIT License
+
+---
 
 ## Support
 
