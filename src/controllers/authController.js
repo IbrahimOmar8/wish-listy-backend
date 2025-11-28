@@ -62,6 +62,7 @@ exports.register = async (req, res) => {
   try {
     const { fullName, username, password } = req.body;
 
+    // Validation
     if (!fullName || !username || !password) {
       return res.status(400).json({
         success: false,
@@ -69,8 +70,41 @@ exports.register = async (req, res) => {
       });
     }
 
+    // Validate fullName
+    if (typeof fullName !== 'string' || fullName.trim().length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Full name must be a non-empty string'
+      });
+    }
+
+    // Validate username
+    if (typeof username !== 'string' || username.trim().length < 3) {
+      return res.status(400).json({
+        success: false,
+        message: 'Username must be at least 3 characters long'
+      });
+    }
+
+    // Validate username format (alphanumeric, underscore, hyphen only)
+    const usernameRegex = /^[a-zA-Z0-9_-]+$/;
+    if (!usernameRegex.test(username)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Username can only contain letters, numbers, underscores, and hyphens'
+      });
+    }
+
+    // Validate password
+    if (typeof password !== 'string' || password.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: 'Password must be at least 6 characters long'
+      });
+    }
+
     // Check if user already exists
-    const existingUser = await User.findOne({ username });
+    const existingUser = await User.findOne({ username: username.toLowerCase() });
 
     if (existingUser) {
       return res.status(400).json({
@@ -79,21 +113,13 @@ exports.register = async (req, res) => {
       });
     }
 
-    // Ensure password is a string before hashing
-    if (typeof password !== 'string' || !password.trim()) {
-      return res.status(400).json({
-        success: false,
-        message: 'Password must be a non-empty string'
-      });
-    }
-
     // Hash password before saving
     const hashedPassword = await bcrypt.hash(password, 10);
 
     // Create new user
     const user = await User.create({
-      fullName,
-      username,
+      fullName: fullName.trim(),
+      username: username.toLowerCase().trim(),
       password: hashedPassword,
       isVerified: true
     });
@@ -111,6 +137,24 @@ exports.register = async (req, res) => {
     });
   } catch (error) {
     console.error('Register Error:', error);
+    
+    // Handle Mongoose validation errors
+    if (error.name === 'ValidationError') {
+      const messages = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({
+        success: false,
+        message: messages.join(', ')
+      });
+    }
+
+    // Handle duplicate key error
+    if (error.code === 11000) {
+      return res.status(400).json({
+        success: false,
+        message: 'Username already exists'
+      });
+    }
+
     res.status(500).json({
       success: false,
       message: 'Failed to register user'

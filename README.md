@@ -179,6 +179,137 @@ Authorization: Bearer <token>
 
 ---
 
+### Items
+
+#### Add Item to Wishlist
+```http
+POST /api/items
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "name": "iPhone 15 Pro",
+  "description": "Latest iPhone",
+  "wishlistId": "60f7b3b3b3b3b3b3b3b3b3b3",
+  "priority": "high"
+}
+```
+
+**Optional location fields (send only the relevant one(s) based on user input):**
+
+**Option 1: Product URL**
+```json
+{
+  "name": "iPhone 15 Pro",
+  "description": "Latest iPhone",
+  "wishlistId": "60f7b3b3b3b3b3b3b3b3b3b3",
+  "url": "https://apple.com/iphone-15-pro",
+  "priority": "high"
+}
+```
+
+**Option 2: Store Details**
+```json
+{
+  "name": "Winter Jacket",
+  "description": "Blue winter jacket",
+  "wishlistId": "60f7b3b3b3b3b3b3b3b3b3b3",
+  "storeName": "H&M",
+  "storeLocation": "Downtown Mall, Street 5",
+  "priority": "medium"
+}
+```
+
+**Option 3: Custom Text**
+```json
+{
+  "name": "Book - Clean Code",
+  "description": "Programming book",
+  "wishlistId": "60f7b3b3b3b3b3b3b3b3b3b3",
+  "notes": "Available at any bookstore or online",
+  "priority": "low"
+}
+```
+
+**Response (201 Created):**
+```json
+{
+  "success": true,
+  "item": {
+    "_id": "60f7b3b3b3b3b3b3b3b3b3b3",
+    "name": "iPhone 15 Pro",
+    "description": "Latest iPhone",
+    "url": "https://apple.com/iphone-15-pro",
+    "storeName": null,
+    "storeLocation": null,
+    "notes": null,
+    "priority": "high",
+    "wishlistId": "60f7b3b3b3b3b3b3b3b3b3b3",
+    "createdAt": "2024-01-15T10:30:00.000Z"
+  }
+}
+```
+
+---
+
+#### Get Items in Wishlist
+```http
+GET /api/items/wishlist/:wishlistId
+Authorization: Bearer <token>
+```
+
+---
+
+#### Update Item
+```http
+PUT /api/items/:id
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "name": "Updated Item Name",
+  "description": "Updated description",
+  "url": "https://updated-url.com",
+  "storeName": "Updated Store",
+  "storeLocation": "Updated Location",
+  "notes": "Updated notes",
+  "priority": "high"
+}
+```
+
+**Note:** All fields are optional. Update only the fields you want to change.
+
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "item": {
+    "_id": "60f7b3b3b3b3b3b3b3b3b3b3",
+    "name": "Updated Item Name",
+    "description": "Updated description",
+    // ...other updated fields
+  }
+}
+```
+
+---
+
+#### Mark Item as Purchased
+```http
+PUT /api/items/:id/purchase
+Authorization: Bearer <token>
+```
+
+---
+
+#### Delete Item
+```http
+DELETE /api/items/:id
+Authorization: Bearer <token>
+```
+
+---
+
 ### Wishlists
 
 #### Create Wishlist
@@ -195,17 +326,38 @@ Content-Type: application/json
 }
 ```
 
+**Response (201 Created):**
+```json
+{
+  "success": true,
+  "wishlist": {
+    "_id": "60f7b3b3b3b3b3b3b3b3b3b3",
+    "name": "My Birthday Wishlist",
+    "description": "Things I want for my birthday",
+    "privacy": "public",
+    "category": "birthday",
+    "owner": "60f7b3b3b3b3b3b3b3b3b3b3"
+  }
+}
+```
+
+---
+
 #### Get My Wishlists
 ```http
 GET /api/wishlists
 Authorization: Bearer <token>
 ```
 
+---
+
 #### Get Wishlist by ID
 ```http
 GET /api/wishlists/:id
 Authorization: Bearer <token>
 ```
+
+---
 
 #### Update Wishlist
 ```http
@@ -214,64 +366,35 @@ Authorization: Bearer <token>
 Content-Type: application/json
 
 {
-  "name": "Updated Name",
-  "privacy": "private"
+  "name": "Updated Wishlist Name",
+  "description": "Updated description",
+  "privacy": "private",
+  "category": "wedding"
 }
 ```
 
-#### Delete Wishlist
-```http
-DELETE /api/wishlists/:id
-Authorization: Bearer <token>
+**Note:** All fields are optional. Update only the fields you want to change.
+
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "wishlist": {
+    "_id": "60f7b3b3b3b3b3b3b3b3b3b3",
+    "name": "Updated Wishlist Name",
+    "description": "Updated description",
+    "privacy": "private",
+    "category": "wedding",
+    // ...other fields
+  }
+}
 ```
 
 ---
 
-### Items
-
-#### Add Item to Wishlist
+#### Delete Wishlist
 ```http
-POST /api/items
-Authorization: Bearer <token>
-Content-Type: application/json
-
-{
-  "name": "iPhone 15 Pro",
-  "description": "Latest iPhone",
-  "price": 999,
-  "url": "https://apple.com",
-  "priority": "high",
-  "wishlistId": "60f7b3b3b3b3b3b3b3b3b3b3"
-}
-```
-
-#### Get Items in Wishlist
-```http
-GET /api/items/wishlist/:wishlistId
-Authorization: Bearer <token>
-```
-
-#### Update Item
-```http
-PUT /api/items/:id
-Authorization: Bearer <token>
-Content-Type: application/json
-
-{
-  "name": "Updated Item Name",
-  "price": 899
-}
-```
-
-#### Mark Item as Purchased
-```http
-PUT /api/items/:id/purchase
-Authorization: Bearer <token>
-```
-
-#### Delete Item
-```http
-DELETE /api/items/:id
+DELETE /api/wishlists/:id
 Authorization: Bearer <token>
 ```
 
