@@ -11,16 +11,20 @@ const itemRoutes = require('./routes/itemRoutes');
 const app = express();
 
 // CORS Configuration
-const corsOptions = {
-  origin: process.env.CORS_ORIGIN || '*', // Allow all origins or specify specific ones
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-};
+// const corsOptions = {
+//   origin: '*', // Allow all origins or specify specific ones
+//   credentials: true,
+//   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+//   allowedHeaders: ['Content-Type', 'Authorization']
+// };
+
 
 // Middleware
 app.use(helmet());
-app.use(cors(corsOptions));
+app.use(cors({
+ origin: true
+}));
+//app.use(cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
