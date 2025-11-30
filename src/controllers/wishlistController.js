@@ -35,7 +35,9 @@ exports.createWishlist = async (req, res) => {
 
 exports.getMyWishlists = async (req, res) => {
   try {
-    const wishlists = await Wishlist.find({ owner: req.user.id });
+    const wishlists = await Wishlist.find({ owner: req.user.id })
+      .populate('items')
+      .populate('owner', 'fullName username profileImage');
 
     res.status(200).json({
       success: true,
@@ -54,7 +56,10 @@ exports.getWishlistById = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const wishlist = await Wishlist.findById(id).populate('items');
+    const wishlist = await Wishlist.findById(id)
+      .populate('items')
+      .populate('owner', 'fullName username profileImage')
+      .populate('sharedWith', 'fullName username profileImage');
 
     if (!wishlist) {
       return res.status(404).json({

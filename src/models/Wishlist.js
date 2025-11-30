@@ -1,4 +1,3 @@
-
 const mongoose = require('mongoose');
 
 const wishlistSchema = new mongoose.Schema({
@@ -9,22 +8,23 @@ const wishlistSchema = new mongoose.Schema({
   },
   description: {
     type: String,
-    trim: true
+    trim: true,
+    default: ''
+  },
+  privacy: {
+    type: String,
+    enum: ['public', 'private', 'friends'],
+    default: 'private'
+  },
+  category: {
+    type: String,
+    default: 'general'
+    // No enum - allows any custom category
   },
   owner: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
     required: true
-  },
-  privacy: {
-    type: String,
-    enum: ['public', 'private', 'friends'],
-    default: 'public'
-  },
-  category: {
-    type: String,
-    enum: ['general', 'birthday', 'wedding', 'graduation', 'anniversary', 'holiday'],
-    default: 'general'
   },
   items: [{
     type: mongoose.Schema.Types.ObjectId,
