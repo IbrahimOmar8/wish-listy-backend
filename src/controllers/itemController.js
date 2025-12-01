@@ -20,7 +20,7 @@ exports.addItem = async (req, res) => {
       });
     }
 
-    // Check if wishlist exists
+    // Check if wishlist exists and verify ownership
     const wishlist = await Wishlist.findById(wishlistId);
     if (!wishlist) {
       return res.status(404).json({
@@ -29,17 +29,34 @@ exports.addItem = async (req, res) => {
       });
     }
 
+    // Optional: Check if user owns the wishlist
+    if (req.user && wishlist.owner.toString() !== req.user.id) {
+      return res.status(403).json({
+        success: false,
+        message: 'You are not authorized to add items to this wishlist'
+      });
+    }
+
     // Create item with proper field mapping
     const item = await Item.create({
       name: name.trim(),
       description: description ? description.trim() : undefined,
-      wishlist: wishlistId, // Use 'wishlist' field name from schema
+      wishlist: wishlistId,
       priority: priority || 'medium',
       url: url || null,
       storeName: storeName || null,
       storeLocation: storeLocation || null,
       notes: notes || null
     });
+
+    // Update the Wishlist by adding the Item ID
+    await Wishlist.findByIdAndUpdate(
+      wishlistId,
+      { 
+        $push: { items: item._id },
+        updatedAt: Date.now()
+      }
+    );
 
     res.status(201).json({
       success: true,
@@ -63,11 +80,53 @@ exports.addItem = async (req, res) => {
   }
 };
 
+exports.deleteItem = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const item = await Item.findById(id);
+    
+    if (!item) {
+      return res.status(404).json({
+        success: false,
+        message: 'Item not found'
+      });
+    }
+
+    // Remove the Item from the Wishlist before deletion
+    if (item.wishlist) {
+      await Wishlist.findByIdAndUpdate(
+        item.wishlist,
+        { 
+          $pull: { items: item._id },
+          updatedAt: Date.now()
+        }
+      );
+    }
+
+    // Delete the Item
+    await Item.findByIdAndDelete(id);
+
+    res.status(200).json({
+      success: true,
+      message: 'Item deleted successfully'
+    });
+  } catch (error) {
+    console.error('Delete Item Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to delete item'
+    });
+  }
+};
+
+// Other functions remain the same with minor improvements
 exports.getItemsByWishlist = async (req, res) => {
   try {
     const { wishlistId } = req.params;
 
-    const items = await Item.find({ wishlist: wishlistId });
+    const items = await Item.find({ wishlist: wishlistId })
+      .populate('purchasedBy', 'fullName username'); // Add populate for purchaser info
 
     res.status(200).json({
       success: true,
@@ -97,7 +156,11 @@ exports.updateItem = async (req, res) => {
       }
     });
 
-    const item = await Item.findByIdAndUpdate(id, filteredUpdates, { new: true, runValidators: true });
+    const item = await Item.findByIdAndUpdate(
+      id, 
+      filteredUpdates, 
+      { new: true, runValidators: true }
+    );
 
     if (!item) {
       return res.status(404).json({
@@ -128,11 +191,11 @@ exports.markItemAsPurchased = async (req, res) => {
       id,
       {
         isPurchased: true,
-        purchasedBy: purchasedBy || null,
+        purchasedBy: purchasedBy || req.user?.id || null,
         purchasedAt: new Date()
       },
       { new: true }
-    );
+    ).populate('purchasedBy', 'fullName username');
 
     if (!item) {
       return res.status(404).json({
@@ -150,32 +213,6 @@ exports.markItemAsPurchased = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to mark item as purchased'
-    });
-  }
-};
-
-exports.deleteItem = async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    const item = await Item.findByIdAndDelete(id);
-
-    if (!item) {
-      return res.status(404).json({
-        success: false,
-        message: 'Item not found'
-      });
-    }
-
-    res.status(200).json({
-      success: true,
-      message: 'Item deleted successfully'
-    });
-  } catch (error) {
-    console.error('Delete Item Error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to delete item'
     });
   }
 };

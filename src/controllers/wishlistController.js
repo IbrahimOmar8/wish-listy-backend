@@ -17,7 +17,8 @@ exports.createWishlist = async (req, res) => {
       description: description || '',
       privacy: privacy || 'private',
       category: category || 'general',
-      owner: req.user.id
+      owner: req.user.id,
+      items: [] // Ensure starting with empty array
     });
 
     res.status(201).json({
@@ -36,7 +37,11 @@ exports.createWishlist = async (req, res) => {
 exports.getMyWishlists = async (req, res) => {
   try {
     const wishlists = await Wishlist.find({ owner: req.user.id })
-      .populate('items')
+      .populate({
+        path: 'items',
+        match: { isPurchased: false }, // Optional: show only unpurchased items
+        options: { sort: { priority: -1, createdAt: -1 } } // Sort by priority and date
+      })
       .populate('owner', 'fullName username profileImage');
 
     res.status(200).json({
@@ -57,7 +62,13 @@ exports.getWishlistById = async (req, res) => {
     const { id } = req.params;
 
     const wishlist = await Wishlist.findById(id)
-      .populate('items')
+      .populate({
+        path: 'items',
+        populate: {
+          path: 'purchasedBy',
+          select: 'fullName username'
+        }
+      })
       .populate('owner', 'fullName username profileImage')
       .populate('sharedWith', 'fullName username profileImage');
 
@@ -68,9 +79,17 @@ exports.getWishlistById = async (req, res) => {
       });
     }
 
+    // Additional statistics
+    const stats = {
+      totalItems: wishlist.items.length,
+      purchasedItems: wishlist.items.filter(item => item.isPurchased).length,
+      pendingItems: wishlist.items.filter(item => !item.isPurchased).length
+    };
+
     res.status(200).json({
       success: true,
-      wishlist
+      wishlist,
+      stats
     });
   } catch (error) {
     console.error('Get Wishlist Error:', error);
@@ -86,6 +105,22 @@ exports.updateWishlist = async (req, res) => {
     const { id } = req.params;
     const updates = req.body;
 
+    // Verify ownership
+    const wishlist = await Wishlist.findById(id);
+    if (!wishlist) {
+      return res.status(404).json({
+        success: false,
+        message: 'Wishlist not found'
+      });
+    }
+
+    if (wishlist.owner.toString() !== req.user.id) {
+      return res.status(403).json({
+        success: false,
+        message: 'You are not authorized to update this wishlist'
+      });
+    }
+
     // Fields that can be updated
     const allowedFields = ['name', 'description', 'privacy', 'category'];
     const filteredUpdates = {};
@@ -96,18 +131,15 @@ exports.updateWishlist = async (req, res) => {
       }
     });
 
-    const wishlist = await Wishlist.findByIdAndUpdate(id, filteredUpdates, { new: true, runValidators: true });
-
-    if (!wishlist) {
-      return res.status(404).json({
-        success: false,
-        message: 'Wishlist not found'
-      });
-    }
+    const updatedWishlist = await Wishlist.findByIdAndUpdate(
+      id, 
+      filteredUpdates, 
+      { new: true, runValidators: true }
+    ).populate('items');
 
     res.status(200).json({
       success: true,
-      wishlist
+      wishlist: updatedWishlist
     });
   } catch (error) {
     console.error('Update Wishlist Error:', error);
@@ -122,8 +154,8 @@ exports.deleteWishlist = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const wishlist = await Wishlist.findByIdAndDelete(id);
-
+    const wishlist = await Wishlist.findById(id);
+    
     if (!wishlist) {
       return res.status(404).json({
         success: false,
@@ -131,15 +163,85 @@ exports.deleteWishlist = async (req, res) => {
       });
     }
 
+    // Verify ownership
+    if (wishlist.owner.toString() !== req.user.id) {
+      return res.status(403).json({
+        success: false,
+        message: 'You are not authorized to delete this wishlist'
+      });
+    }
+
+    // Delete all related items first
+    await Item.deleteMany({ wishlist: id });
+
+    // Delete the wishlist
+    await Wishlist.findByIdAndDelete(id);
+
     res.status(200).json({
       success: true,
-      message: 'Wishlist deleted successfully'
+      message: 'Wishlist and all related items deleted successfully'
     });
   } catch (error) {
     console.error('Delete Wishlist Error:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to delete wishlist'
+    });
+  }
+};
+
+// Additional useful function - Share wishlist with other users
+exports.shareWishlist = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { userId } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'User ID is required'
+      });
+    }
+
+    const wishlist = await Wishlist.findById(id);
+    
+    if (!wishlist) {
+      return res.status(404).json({
+        success: false,
+        message: 'Wishlist not found'
+      });
+    }
+
+    // Verify ownership
+    if (wishlist.owner.toString() !== req.user.id) {
+      return res.status(403).json({
+        success: false,
+        message: 'You are not authorized to share this wishlist'
+      });
+    }
+
+    // Check if already shared
+    if (wishlist.sharedWith.includes(userId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Wishlist is already shared with this user'
+      });
+    }
+
+    // Add user to sharedWith array
+    wishlist.sharedWith.push(userId);
+    await wishlist.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Wishlist shared successfully',
+      wishlist
+    });
+  } catch (error) {
+    console.error('Share Wishlist Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to share wishlist'
     });
   }
 };
