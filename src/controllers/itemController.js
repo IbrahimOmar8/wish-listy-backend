@@ -40,7 +40,7 @@ exports.addItem = async (req, res) => {
     // Create item with proper field mapping
     const item = await Item.create({
       name: name.trim(),
-      description: description ? description.trim() : undefined,
+      description: description ? description.trim() : null,
       wishlist: wishlistId,
       priority: priority || 'medium',
       url: url || null,
@@ -49,18 +49,26 @@ exports.addItem = async (req, res) => {
       notes: notes || null
     });
 
-    // Update the Wishlist by adding the Item ID
-    await Wishlist.findByIdAndUpdate(
-      wishlistId,
-      { 
-        $push: { items: item._id },
-        updatedAt: Date.now()
-      }
-    );
+    // Populate and return full item details
+    const populatedItem = await Item.findById(item._id).populate('wishlist');
 
     res.status(201).json({
       success: true,
-      item
+      item: {
+        _id: populatedItem._id,
+        name: populatedItem.name,
+        description: populatedItem.description,
+        url: populatedItem.url,
+        storeName: populatedItem.storeName,
+        storeLocation: populatedItem.storeLocation,
+        notes: populatedItem.notes,
+        priority: populatedItem.priority,
+        image: populatedItem.image,
+        isPurchased: populatedItem.isPurchased,
+        wishlist: populatedItem.wishlist,
+        createdAt: populatedItem.createdAt,
+        updatedAt: populatedItem.updatedAt
+      }
     });
   } catch (error) {
     console.error('Add Item Error:', error);

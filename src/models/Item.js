@@ -8,14 +8,32 @@ const itemSchema = new mongoose.Schema({
   },
   description: {
     type: String,
-    trim: true
+    trim: true,
+    default: null
   },
   url: {
     type: String,
-    trim: true
+    trim: true,
+    default: null
+  },
+  storeName: {
+    type: String,
+    trim: true,
+    default: null
+  },
+  storeLocation: {
+    type: String,
+    trim: true,
+    default: null
+  },
+  notes: {
+    type: String,
+    trim: true,
+    default: null
   },
   image: {
-    type: String
+    type: String,
+    default: null
   },
   isPurchased: {
     type: Boolean,
@@ -23,10 +41,12 @@ const itemSchema = new mongoose.Schema({
   },
   purchasedBy: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'User'
+    ref: 'User',
+    default: null
   },
   purchasedAt: {
-    type: Date
+    type: Date,
+    default: null
   },
   wishlist: {
     type: mongoose.Schema.Types.ObjectId,
@@ -47,8 +67,10 @@ const itemSchema = new mongoose.Schema({
     default: Date.now
   }
 });
+
 itemSchema.pre('save', function(next) {
   this.updatedAt = Date.now();
   next();
 });
+
 module.exports = mongoose.model('Item', itemSchema);
