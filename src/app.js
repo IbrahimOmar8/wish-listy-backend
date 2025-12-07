@@ -7,6 +7,7 @@ const errorHandler = require('./middleware/errorHandler');
 const authRoutes = require('./routes/authRoutes');
 const wishlistRoutes = require('./routes/wishlistRoutes');
 const itemRoutes = require('./routes/itemRoutes');
+const eventRoutes = require('./routes/Eventroutes');
 
 const app = express();
 
@@ -45,13 +46,20 @@ app.get('/', (req, res) => {
   res.json({
     success: true,
     message: 'Wish Listy API is running',
-    version: '1.0.0'
+    version: '1.0.0',
+    endpoints: {
+      auth: '/api/auth',
+      wishlists: '/api/wishlists',
+      items: '/api/items',
+      events: '/api/events'
+    }
   });
 });
 
 app.use('/api/auth', authRoutes);
 app.use('/api/wishlists', wishlistRoutes);
 app.use('/api/items', itemRoutes);
+app.use('/api/events', eventRoutes);
 
 // Error Handler
 app.use(errorHandler);
