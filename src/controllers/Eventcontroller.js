@@ -12,13 +12,15 @@ exports.createEvent = async (req, res) => {
       name,
       description,
       date,
+      time,
       type,
       privacy,
       mode,
       location,
       meeting_link,
       wishlist_id,
-      invited_friends
+      invited_friends ,
+      
     } = req.body;
 
     // Validation - Required fields
@@ -36,6 +38,15 @@ exports.createEvent = async (req, res) => {
         errors.date = 'Invalid date format. Use ISO 8601 format';
       } else if (eventDate <= new Date()) {
         errors.date = 'Event date must be in the future';
+      }
+    }
+
+    if (!time) {
+      errors.time = 'Event time is required';
+    } else {
+      const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/; // HH:MM 24-hour format
+      if (!timeRegex.test(time)) {
+        errors.time = 'Invalid time format. Use HH:MM in 24-hour format';
       }
     }
 
@@ -119,6 +130,7 @@ exports.createEvent = async (req, res) => {
       name: name.trim(),
       description: description ? description.trim() : null,
       date: new Date(date),
+      time: time.trim(),
       type,
       privacy,
       mode,
@@ -126,7 +138,7 @@ exports.createEvent = async (req, res) => {
       meeting_link: meeting_link || null,
       creator: req.user.id,
       wishlist: wishlist_id || null,
-      invited_friends: validFriendIds
+      invited_friends: validFriendIds 
     });
 
     // Create EventInvitation records for invited friends
@@ -159,6 +171,7 @@ exports.createEvent = async (req, res) => {
         name: populatedEvent.name,
         description: populatedEvent.description,
         date: populatedEvent.date.toISOString(),
+        time: populatedEvent.time,
         type: populatedEvent.type,
         status: populatedEvent.status,
         privacy: populatedEvent.privacy,

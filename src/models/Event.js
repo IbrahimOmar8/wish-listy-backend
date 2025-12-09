@@ -28,6 +28,18 @@ const eventSchema = new mongoose.Schema({
       message: 'Event date must be in the future'
     }
   },
+  time: {
+    type: String,
+    required: [true, 'Event time is required'],
+    validate: {
+      validator: function(value) {
+        // Validate time format HH:mm
+        const timeRegex = /^([01]\d|2[0-3]):([0-5]\d)$/;
+        return timeRegex.test(value);
+      },
+      message: 'Invalid time format. Use HH:mm (24-hour format)'
+    }
+  },
   type: {
     type: String,
     required: [true, 'Event type is required'],

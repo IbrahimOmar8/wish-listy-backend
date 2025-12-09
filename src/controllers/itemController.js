@@ -148,7 +148,38 @@ exports.getItemsByWishlist = async (req, res) => {
     });
   }
 };
+// Get item by ID with purchaser info
+exports.getItemById = async (req, res) => {
+  try {
+    const { id } = req.params;
 
+    const item = await Item.findById(id) ;
+    if (!item) {
+      return res.status(404).json({
+        success: false,
+        message: 'Item not found'
+      });
+    }
+
+    // Populate purchaser info if item is purchased
+    if (item.isPurchased) {
+      await item.populate('purchasedBy', 'fullName username');
+    }
+
+    res.status(200).json({
+      success: true,
+      item
+    });
+  } catch (error) {
+    console.error('Get Item by ID Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get item'
+    });
+  }
+}   
+
+// Update item with field filtering
 exports.updateItem = async (req, res) => {
   try {
     const { id } = req.params;

@@ -7,6 +7,8 @@ router.use(protect);
 
 // Add Item to Wishlist
 router.post('/', itemController.addItem);
+// Get Item by ID
+router.get('/:id', itemController.getItemById);
 
 // Get Items by Wishlist ID
 router.get('/wishlist/:wishlistId', itemController.getItemsByWishlist);
