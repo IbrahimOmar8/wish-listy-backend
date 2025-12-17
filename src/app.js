@@ -8,6 +8,8 @@ const authRoutes = require('./routes/authRoutes');
 const wishlistRoutes = require('./routes/wishlistRoutes');
 const itemRoutes = require('./routes/itemRoutes');
 const eventRoutes = require('./routes/Eventroutes');
+const userRoutes = require('./routes/userRoutes');
+const friendRoutes = require('./routes/friendRoutes');
 
 const app = express();
 
@@ -51,7 +53,9 @@ app.get('/', (req, res) => {
       auth: '/api/auth',
       wishlists: '/api/wishlists',
       items: '/api/items',
-      events: '/api/events'
+      events: '/api/events',
+      users: '/api/users',
+      friends: '/api/friends'
     }
   });
 });
@@ -60,6 +64,8 @@ app.use('/api/auth', authRoutes);
 app.use('/api/wishlists', wishlistRoutes);
 app.use('/api/items', itemRoutes);
 app.use('/api/events', eventRoutes);
+app.use('/api/users', userRoutes);
+app.use('/api/friends', friendRoutes);
 
 // Error Handler
 app.use(errorHandler);
