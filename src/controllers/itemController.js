@@ -49,6 +49,15 @@ exports.addItem = async (req, res) => {
       notes: notes || null
     });
 
+    // Add the item to the wishlist's items array
+    await Wishlist.findByIdAndUpdate(
+      wishlistId,
+      { 
+        $push: { items: item._id },
+        updatedAt: Date.now()
+      }
+    );
+
     // Populate and return full item details
     const populatedItem = await Item.findById(item._id).populate('wishlist');
 

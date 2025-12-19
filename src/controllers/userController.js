@@ -1,9 +1,13 @@
 const User = require('../models/User');
+const FriendRequest = require('../models/FriendRequest');
+const Wishlist = require('../models/Wishlist');
+const Event = require('../models/Event');
 
 // Search users by username, email, or phone
 exports.searchUsers = async (req, res) => {
   try {
     const { type, value } = req.query;
+    const currentUserId = req.user._id;
 
     // Validate query parameters
     if (!type || !value) {
@@ -31,15 +35,84 @@ exports.searchUsers = async (req, res) => {
       searchQuery.phone = { $regex: `^${value}`, $options: 'i' };
     }
 
+    // Exclude current user from search results
+    searchQuery._id = { $ne: currentUserId };
+
     // Search users and return safe fields only
     const users = await User.find(searchQuery)
-      .select('_id fullName username profileImage')
+      .select('_id fullName username profileImage friends')
       .limit(20);
+
+    // Get current user's friends list and friend requests
+    const currentUser = await User.findById(currentUserId).select('friends');
+    const friendIds = currentUser.friends.map(f => f.toString());
+
+    // Get all pending friend requests involving current user
+    const userIds = users.map(u => u._id.toString());
+    const friendRequests = await FriendRequest.find({
+      $or: [
+        { from: currentUserId, to: { $in: userIds }, status: 'pending' },
+        { from: { $in: userIds }, to: currentUserId, status: 'pending' }
+      ]
+    });
+
+    // Create a map for quick lookup
+    const requestMap = new Map();
+    friendRequests.forEach(req => {
+      const fromId = req.from.toString();
+      const toId = req.to.toString();
+      if (fromId === currentUserId.toString()) {
+        // Current user sent request
+        requestMap.set(toId, { 
+          status: 'sent', 
+          requestId: req._id,
+          direction: 'sent' 
+        });
+      } else {
+        // Current user received request
+        requestMap.set(fromId, { 
+          status: 'received', 
+          requestId: req._id,
+          direction: 'received' 
+        });
+      }
+    });
+
+    // Enrich users with friendship status
+    const enrichedUsers = users.map(user => {
+      const userId = user._id.toString();
+      const isFriend = friendIds.includes(userId);
+      const requestInfo = requestMap.get(userId);
+
+      let friendshipStatus = 'none';
+      let friendRequestId = null;
+      let canSendRequest = true;
+
+      if (isFriend) {
+        friendshipStatus = 'friends';
+        canSendRequest = false;
+      } else if (requestInfo) {
+        friendshipStatus = requestInfo.status;
+        friendRequestId = requestInfo.requestId;
+        canSendRequest = false;
+      }
+
+      return {
+        _id: user._id,
+        fullName: user.fullName,
+        username: user.username,
+        profileImage: user.profileImage,
+        friendshipStatus,
+        friendRequestId,
+        isFriend,
+        canSendRequest
+      };
+    });
 
     res.status(200).json({
       success: true,
-      count: users.length,
-      data: users
+      count: enrichedUsers.length,
+      data: enrichedUsers
     });
   } catch (error) {
     console.error('Search users error:', error);
@@ -66,7 +139,13 @@ exports.getUserProfile = async (req, res) => {
       });
     }
 
-    // Return profile with friends count
+    // Calculate related counts in parallel
+    const [wishlistCount, eventsCount] = await Promise.all([
+      Wishlist.countDocuments({ owner: id }),
+      Event.countDocuments({ creator: id })
+    ]);
+
+    // Return profile with friends, wishlist, and events counts
     res.status(200).json({
       success: true,
       data: {
@@ -75,6 +154,8 @@ exports.getUserProfile = async (req, res) => {
         username: user.username,
         profileImage: user.profileImage,
         friendsCount: user.friends.length,
+        wishlistCount,
+        eventsCount,
         createdAt: user.createdAt
       }
     });
