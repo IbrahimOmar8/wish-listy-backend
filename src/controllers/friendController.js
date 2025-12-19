@@ -1,5 +1,20 @@
 const FriendRequest = require('../models/FriendRequest');
 const User = require('../models/User');
+const Notification = require('../models/Notification');
+const Wishlist = require('../models/Wishlist');
+
+// Helper function to calculate unreadCount with badge dismissal logic
+const getUnreadCountWithBadge = async (userId) => {
+  const user = await User.findById(userId).select('lastBadgeSeenAt');
+  const query = {
+    user: userId,
+    isRead: false
+  };
+  if (user && user.lastBadgeSeenAt) {
+    query.createdAt = { $gt: user.lastBadgeSeenAt };
+  }
+  return await Notification.countDocuments(query);
+};
 
 // Send friend request
 exports.sendFriendRequest = async (req, res) => {
@@ -66,12 +81,26 @@ exports.sendFriendRequest = async (req, res) => {
     await friendRequest.populate('from', '_id fullName username profileImage');
     await friendRequest.populate('to', '_id fullName username profileImage');
 
+    // Create notification for the receiver
+    await Notification.create({
+      user: toUserId,
+      type: 'friend_request',
+      title: 'New Friend Request',
+      message: `${friendRequest.from.fullName} sent you a friend request`,
+      relatedUser: fromUserId,
+      relatedId: friendRequest._id
+    });
+
+    // Calculate recipient's current unreadCount with badge dismissal logic
+    const unreadCount = await getUnreadCountWithBadge(toUserId);
+
     // Emit socket event if io is available
     if (req.app.get('io')) {
       req.app.get('io').to(toUserId).emit('friend_request', {
         requestId: friendRequest._id,
         from: friendRequest.from,
-        message: `${friendRequest.from.fullName} sent you a friend request`
+        message: `${friendRequest.from.fullName} sent you a friend request`,
+        unreadCount
       });
     }
 
@@ -175,12 +204,26 @@ exports.respondToFriendRequest = async (req, res) => {
         { $addToSet: { friends: friendRequest.from._id } }
       );
 
+      // Create notification for the sender
+      await Notification.create({
+        user: friendRequest.from._id,
+        type: 'friend_request_accepted',
+        title: 'Friend Request Accepted',
+        message: `${friendRequest.to.fullName} accepted your friend request`,
+        relatedUser: friendRequest.to._id,
+        relatedId: friendRequest._id
+      });
+
+      // Calculate sender's current unreadCount with badge dismissal logic
+      const unreadCount = await getUnreadCountWithBadge(friendRequest.from._id);
+
       // Emit socket event if io is available
       if (req.app.get('io')) {
         req.app.get('io').to(friendRequest.from._id.toString()).emit('friend_request_accepted', {
           requestId: friendRequest._id,
           user: friendRequest.to,
-          message: `${friendRequest.to.fullName} accepted your friend request`
+          message: `${friendRequest.to.fullName} accepted your friend request`,
+          unreadCount
         });
       }
 
@@ -194,11 +237,18 @@ exports.respondToFriendRequest = async (req, res) => {
       friendRequest.status = 'rejected';
       await friendRequest.save();
 
+      // Note: No notification created for rejected requests (by design)
+      // Only Socket.IO event is sent for real-time updates
+
+      // Calculate sender's current unreadCount with badge dismissal logic (for consistency, even though no notification was created)
+      const unreadCount = await getUnreadCountWithBadge(friendRequest.from._id);
+
       // Emit socket event if io is available
       if (req.app.get('io')) {
         req.app.get('io').to(friendRequest.from._id.toString()).emit('friend_request_rejected', {
           requestId: friendRequest._id,
-          message: 'Your friend request was rejected'
+          message: 'Your friend request was rejected',
+          unreadCount
         });
       }
 
@@ -213,6 +263,83 @@ exports.respondToFriendRequest = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error responding to friend request',
+      error: error.message
+    });
+  }
+};
+
+// Get my friends list
+exports.getMyFriends = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { limit = 100, page = 1 } = req.query;
+
+    // Get current user to access friends array
+    const currentUser = await User.findById(userId).select('friends');
+
+    if (!currentUser) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    const totalFriends = currentUser.friends.length;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    // Get friends with pagination and sorting
+    const friends = await User.find({
+      _id: { $in: currentUser.friends }
+    })
+      .select('_id fullName username profileImage')
+      .sort({ fullName: 1 }) // Sort alphabetically by name
+      .skip(skip)
+      .limit(parseInt(limit));
+
+    // Get wishlist counts for all friends in parallel
+    const friendIds = friends.map(friend => friend._id);
+    const wishlistCounts = await Wishlist.aggregate([
+      {
+        $match: {
+          owner: { $in: friendIds }
+        }
+      },
+      {
+        $group: {
+          _id: '$owner',
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    // Create a map for quick lookup
+    const wishlistCountMap = new Map();
+    wishlistCounts.forEach(item => {
+      wishlistCountMap.set(item._id.toString(), item.count);
+    });
+
+    // Enrich friends with wishlist count
+    const enrichedFriends = friends.map(friend => ({
+      _id: friend._id,
+      fullName: friend.fullName,
+      username: friend.username,
+      profileImage: friend.profileImage,
+      wishlistCount: wishlistCountMap.get(friend._id.toString()) || 0
+    }));
+
+    res.status(200).json({
+      success: true,
+      count: enrichedFriends.length,
+      total: totalFriends,
+      page: parseInt(page),
+      limit: parseInt(limit),
+      data: enrichedFriends
+    });
+  } catch (error) {
+    console.error('Get my friends error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching friends',
       error: error.message
     });
   }

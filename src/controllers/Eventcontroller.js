@@ -2,6 +2,7 @@ const Event = require('../models/Event');
 const EventInvitation = require('../models/Eventinvitation');
 const Wishlist = require('../models/Wishlist');
 const User = require('../models/User');
+const Notification = require('../models/Notification');
 
 // @desc    Create new event
 // @route   POST /api/events
@@ -113,16 +114,23 @@ exports.createEvent = async (req, res) => {
 
     // Validate invited_friends if provided
     let validFriendIds = [];
-    if (invited_friends && Array.isArray(invited_friends) && invited_friends.length > 0) {
-      // Verify all friend IDs exist and are friends with the user
-      const friendUsers = await User.find({ _id: { $in: invited_friends } });
-      validFriendIds = friendUsers.map(u => u._id);
-      
-      // Optionally: Check if they are actually friends (uncomment if you have friendship validation)
-      // const userWithFriends = await User.findById(req.user.id);
-      // validFriendIds = validFriendIds.filter(fid => 
-      //   userWithFriends.friends.some(f => f.toString() === fid.toString())
-      // );
+    if (invited_friends !== undefined && invited_friends !== null) {
+      // If empty array or null, set to empty array
+      if (Array.isArray(invited_friends)) {
+        if (invited_friends.length > 0) {
+          // Verify all friend IDs exist
+          const friendUsers = await User.find({ _id: { $in: invited_friends } });
+          validFriendIds = friendUsers.map(u => u._id);
+          
+          // Optionally: Check if they are actually friends (uncomment if you have friendship validation)
+          // const userWithFriends = await User.findById(req.user.id);
+          // validFriendIds = validFriendIds.filter(fid => 
+          //   userWithFriends.friends.some(f => f.toString() === fid.toString())
+          // );
+        }
+        // If array is empty, validFriendIds remains []
+      }
+      // If not an array, validFriendIds remains []
     }
 
     // Create the event
@@ -179,7 +187,7 @@ exports.createEvent = async (req, res) => {
         location: populatedEvent.location,
         meeting_link: populatedEvent.meeting_link,
         wishlist_id: populatedEvent.wishlist ? populatedEvent.wishlist._id : null,
-        invited_friends: populatedEvent.invited_friends,
+        invited_friends: Array.isArray(populatedEvent.invited_friends) ? populatedEvent.invited_friends : [],
         created_at: populatedEvent.createdAt.toISOString(),
         updated_at: populatedEvent.updatedAt.toISOString()
       }
@@ -240,7 +248,8 @@ exports.getMyEvents = async (req, res) => {
         path: 'event',
         populate: [
           { path: 'creator', select: 'fullName username profileImage' },
-          { path: 'wishlist', select: 'name description' }
+          { path: 'wishlist', select: 'name description' },
+          { path: 'invited_friends', select: 'fullName username profileImage' }
         ]
       });
 
@@ -322,7 +331,10 @@ exports.getEventById = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      data: event,
+      data: {
+        ...event.toObject(),
+        invited_friends: event.invited_friends || []
+      },
       stats
     });
   } catch (error) {
@@ -369,6 +381,21 @@ exports.updateEvent = async (req, res) => {
       }
     });
 
+    // Handle invited_friends separately (not in allowedFields because it needs validation)
+    let validFriendIds = null;
+    if (updates.hasOwnProperty('invited_friends')) {
+      const { invited_friends } = updates;
+      
+      if (invited_friends && Array.isArray(invited_friends)) {
+        // Validate friend IDs exist
+        const friendUsers = await User.find({ _id: { $in: invited_friends } });
+        validFriendIds = friendUsers.map(u => u._id);
+      } else {
+        validFriendIds = [];
+      }
+      filteredUpdates.invited_friends = validFriendIds;
+    }
+
     // Validate meeting_link if mode is being updated
     if (filteredUpdates.mode && (filteredUpdates.mode === 'online' || filteredUpdates.mode === 'hybrid')) {
       if (!filteredUpdates.meeting_link && !event.meeting_link) {
@@ -388,6 +415,29 @@ exports.updateEvent = async (req, res) => {
       .populate('creator', 'fullName username profileImage')
       .populate('wishlist', 'name description')
       .populate('invited_friends', 'fullName username profileImage');
+    
+    // Update EventInvitation records if invited_friends was updated
+    if (validFriendIds !== null) {
+      // Remove old invitations
+      await EventInvitation.deleteMany({ event: id });
+      
+      // Create new invitations for valid friends
+      if (validFriendIds.length > 0) {
+        const invitations = validFriendIds.map(friendId => ({
+          event: id,
+          invitee: friendId,
+          inviter: req.user.id,
+          status: 'pending'
+        }));
+
+        await EventInvitation.insertMany(invitations, { ordered: false }).catch(err => {
+          console.log('Some invitations may have already existed:', err.message);
+        });
+      }
+      
+      // Re-populate the event to get updated invited_friends
+      await updatedEvent.populate('invited_friends', 'fullName username profileImage');
+    }
 
     res.status(200).json({
       success: true,
@@ -506,7 +556,8 @@ exports.linkWishlist = async (req, res) => {
     await event.save();
 
     const updatedEvent = await Event.findById(id)
-      .populate('wishlist', 'name description');
+      .populate('wishlist', 'name description')
+      .populate('invited_friends', 'fullName username profileImage');
 
     res.status(200).json({
       success: true,
@@ -610,25 +661,28 @@ exports.inviteFriends = async (req, res) => {
 };
 
 // @desc    Respond to an event invitation
-// @route   PUT /api/events/:id/respond
+// @route   PUT /api/events/:id/respond or PATCH /api/events/:id/respond
 // @access  Private (invitee only)
 exports.respondToInvitation = async (req, res) => {
   try {
     const { id } = req.params;
-    const { response } = req.body;
+    // Support both 'response' and 'status' field names for backward compatibility
+    const { response, status } = req.body;
+    const responseStatus = response || status;
 
     const validResponses = ['accepted', 'declined', 'maybe'];
-    if (!response || !validResponses.includes(response)) {
+    if (!responseStatus || !validResponses.includes(responseStatus)) {
       return res.status(400).json({
         success: false,
-        message: `Invalid response. Must be one of: ${validResponses.join(', ')}`
+        message: `Invalid response. Must be one of: ${validResponses.join(', ')}. Provide either 'response' or 'status' field.`
       });
     }
 
+    // Find the invitation
     const invitation = await EventInvitation.findOne({
       event: id,
       invitee: req.user.id
-    });
+    }).populate('event', 'name creator');
 
     if (!invitation) {
       return res.status(404).json({
@@ -637,20 +691,130 @@ exports.respondToInvitation = async (req, res) => {
       });
     }
 
-    invitation.status = response;
+    // Get the event to access creator and name
+    const event = invitation.event;
+    if (!event) {
+      return res.status(404).json({
+        success: false,
+        message: 'Event not found'
+      });
+    }
+
+    // Update invitation status
+    const previousStatus = invitation.status;
+    invitation.status = responseStatus;
     invitation.respondedAt = new Date();
     await invitation.save();
 
+    // Get the responding user's info for the notification
+    const respondingUser = await User.findById(req.user.id).select('fullName username profileImage');
+    if (!respondingUser) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Create notification for the event creator (only if status changed)
+    if (previousStatus !== responseStatus && event.creator.toString() !== req.user.id) {
+      const statusMessages = {
+        'accepted': 'accepted',
+        'declined': 'declined',
+        'maybe': 'might attend'
+      };
+
+      await Notification.create({
+        user: event.creator,
+        type: 'event_invitation',
+        title: 'Event Invitation Response',
+        message: `${respondingUser.fullName} ${statusMessages[responseStatus]} your invitation to: ${event.name}`,
+        relatedUser: req.user.id,
+        relatedId: event._id
+      });
+
+      // Helper function to calculate unreadCount (similar to friendController)
+      const getUnreadCountWithBadge = async (userId) => {
+        const user = await User.findById(userId).select('lastBadgeSeenAt');
+        const query = {
+          user: userId,
+          isRead: false
+        };
+        if (user && user.lastBadgeSeenAt) {
+          query.createdAt = { $gt: user.lastBadgeSeenAt };
+        }
+        return await Notification.countDocuments(query);
+      };
+
+      // Calculate creator's current unreadCount with badge dismissal logic
+      const unreadCount = await getUnreadCountWithBadge(event.creator);
+
+      // Emit socket event if io is available
+      if (req.app.get('io')) {
+        req.app.get('io').to(event.creator.toString()).emit('event_invitation_response', {
+          eventId: event._id,
+          eventName: event.name,
+          user: {
+            _id: respondingUser._id,
+            fullName: respondingUser.fullName,
+            username: respondingUser.username,
+            profileImage: respondingUser.profileImage
+          },
+          status: responseStatus,
+          message: `${respondingUser.fullName} ${statusMessages[responseStatus]} your invitation to: ${event.name}`,
+          unreadCount
+        });
+      }
+    }
+
+    // Get the updated event with populated fields
+    const updatedEvent = await Event.findById(id)
+      .populate('creator', 'fullName username profileImage')
+      .populate('wishlist', 'name description items')
+      .populate('invited_friends', 'fullName username profileImage');
+
+    // Get invitation stats for the response
+    const invitationStats = await EventInvitation.aggregate([
+      { $match: { event: event._id } },
+      {
+        $group: {
+          _id: '$status',
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    const stats = {
+      total_invited: updatedEvent.invited_friends.length,
+      pending: 0,
+      accepted: 0,
+      declined: 0,
+      maybe: 0
+    };
+
+    invitationStats.forEach(stat => {
+      stats[stat._id] = stat.count;
+    });
+
     res.status(200).json({
       success: true,
-      message: `Invitation ${response} successfully`,
-      data: invitation
+      message: `Invitation ${responseStatus} successfully`,
+      data: {
+        ...updatedEvent.toObject(),
+        invited_friends: updatedEvent.invited_friends || []
+      },
+      invitation: {
+        _id: invitation._id,
+        status: invitation.status,
+        respondedAt: invitation.respondedAt
+      },
+      stats
     });
   } catch (error) {
     console.error('Respond to Invitation Error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to respond to invitation'
+      message: 'Failed to respond to invitation',
+      error: error.message
     });
   }
 };
@@ -674,6 +838,7 @@ exports.getPublicEvents = async (req, res) => {
 
     const events = await Event.find(query)
       .populate('creator', 'fullName username profileImage')
+      .populate('invited_friends', 'fullName username profileImage')
       .sort({ date: 1 })
       .skip((page - 1) * limit)
       .limit(parseInt(limit));

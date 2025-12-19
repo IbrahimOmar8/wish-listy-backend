@@ -177,3 +177,22 @@ exports.getMe = async (req, res) => {
     });
   }
 };
+
+// Logout user
+exports.logout = async (req, res) => {
+  try {
+    // Since JWT is stateless, logout is primarily handled on the client side
+    // by removing the token from storage. This endpoint can be used for
+    // server-side logging or future token blacklisting if needed.
+    res.status(200).json({
+      success: true,
+      message: 'Logged out successfully'
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Error logging out',
+      error: error.message
+    });
+  }
+};

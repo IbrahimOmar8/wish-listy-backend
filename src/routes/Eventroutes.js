@@ -34,6 +34,8 @@ router.put('/:id/wishlist', linkWishlist);
 
 // Invitation routes
 router.post('/:id/invite', inviteFriends);
+// Support both PUT and PATCH for responding to invitations
 router.put('/:id/respond', respondToInvitation);
+router.patch('/:id/respond', respondToInvitation);
 
 module.exports = router;

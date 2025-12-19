@@ -5,11 +5,15 @@ const {
   sendFriendRequest,
   getFriendRequests,
   respondToFriendRequest,
-  getFriendSuggestions
+  getFriendSuggestions,
+  getMyFriends
 } = require('../controllers/friendController');
 
 // Send friend request
 router.post('/request', protect, sendFriendRequest);
+
+// Get my friends list
+router.get('/', protect, getMyFriends);
 
 // Get incoming friend requests
 router.get('/requests', protect, getFriendRequests);
