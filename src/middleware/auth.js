@@ -3,6 +3,11 @@ const User = require('../models/User');
 
 exports.protect = async (req, res, next) => {
   try {
+    // Skip authentication for OPTIONS requests (preflight)
+    if (req.method === 'OPTIONS') {
+      return res.sendStatus(204);
+    }
+
     let token;
 
     if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {

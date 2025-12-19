@@ -31,15 +31,28 @@ app.use(helmet({
   crossOriginResourcePolicy: false, // Allow cross-origin resources
   crossOriginOpenerPolicy: false // Allow cross-origin opener
 }));
+
+// CORS Configuration - Must be before any routes
 app.use(cors({
-  origin: '*', // Allow all origins for development
+  origin: '*', // Allow all origins (for development and production)
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS', 'HEAD'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
+  exposedHeaders: ['Content-Type', 'Authorization'],
   preflightContinue: false,
-  optionsSuccessStatus: 204
+  optionsSuccessStatus: 204, // Some legacy browsers (IE11, various SmartTVs) choke on 204
+  maxAge: 86400 // 24 hours
 }));
-//app.use(cors(corsOptions));
+
+// Handle preflight requests explicitly - BEFORE authentication middleware
+app.options('*', (req, res) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
+  res.header('Access-Control-Max-Age', '86400');
+  res.sendStatus(204);
+});
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
