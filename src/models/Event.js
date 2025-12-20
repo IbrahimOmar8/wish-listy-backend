@@ -106,8 +106,20 @@ const eventSchema = new mongoose.Schema({
     default: null
   },
   invited_friends: [{
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User'
+    user: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true
+    },
+    status: {
+      type: String,
+      enum: ['pending', 'accepted', 'declined', 'maybe'],
+      default: 'pending'
+    },
+    updatedAt: {
+      type: Date,
+      default: Date.now
+    }
   }],
   createdAt: {
     type: Date,

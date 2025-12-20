@@ -33,6 +33,7 @@ app.use(helmet({
 }));
 
 // CORS Configuration - Must be before any routes
+// This middleware automatically handles preflight (OPTIONS) requests
 app.use(cors({
   origin: '*', // Allow all origins (for development and production)
   credentials: true,
@@ -43,15 +44,6 @@ app.use(cors({
   optionsSuccessStatus: 204, // Some legacy browsers (IE11, various SmartTVs) choke on 204
   maxAge: 86400 // 24 hours
 }));
-
-// Handle preflight requests explicitly - BEFORE authentication middleware
-app.options('*', (req, res) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
-  res.header('Access-Control-Max-Age', '86400');
-  res.sendStatus(204);
-});
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));

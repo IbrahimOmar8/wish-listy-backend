@@ -4,6 +4,192 @@ const Wishlist = require('../models/Wishlist');
 const User = require('../models/User');
 const Notification = require('../models/Notification');
 
+// Helper function to populate invited_friends.user if not already populated
+// Handles both old format (array of ObjectIds) and new format (array of objects with user field)
+const populateInvitedFriends = async (event) => {
+  if (!event || !event.invited_friends || event.invited_friends.length === 0) {
+    return event;
+  }
+
+  // Check if already populated (has fullName in user object)
+  // Also check if user field exists at all
+  const needsPopulation = event.invited_friends.some(
+    inv => {
+      // Check if inv has user field
+      if (inv.user) {
+        // If user is populated (has fullName), no need for population
+        if (typeof inv.user === 'object' && inv.user.fullName) {
+          return false;
+        }
+        // If user is ObjectId string or ObjectId object, needs population
+        return typeof inv.user === 'string' || 
+               (typeof inv.user === 'object' && inv.user.constructor && inv.user.constructor.name === 'ObjectId');
+      }
+      // If no user field, we need to populate - user ID might be in _id field or we need to get it from EventInvitation
+      // For now, we'll try to get it from EventInvitation collection
+      return true;
+    }
+  );
+
+  if (!needsPopulation) {
+    return event; // Already populated
+  }
+
+  // Get all user IDs that need to be populated
+  // First, try to get user IDs from invited_friends array
+  let userIds = event.invited_friends
+    .map(inv => {
+      // Handle new format: inv has user field
+      if (inv.user) {
+        if (typeof inv.user === 'string') return inv.user;
+        if (inv.user.constructor && inv.user.constructor.name === 'ObjectId') return inv.user.toString();
+        // If already populated, skip
+        if (inv.user.fullName) return null;
+        return inv.user._id || inv.user;
+      }
+      // If no user field, try to get from EventInvitation
+      return null; // Will handle separately
+    })
+    .filter(Boolean);
+
+  // If we have entries without user field, get user IDs from EventInvitation
+  const entriesWithoutUser = event.invited_friends.filter(inv => !inv.user);
+  if (entriesWithoutUser.length > 0 && event._id) {
+    const invitations = await EventInvitation.find({ event: event._id })
+      .select('invitee');
+    const inviteeIds = invitations.map(inv => inv.invitee.toString());
+    userIds = [...userIds, ...inviteeIds];
+  }
+
+  // Remove duplicates
+  userIds = [...new Set(userIds)];
+
+  if (userIds.length === 0) {
+    return event;
+  }
+
+  // Fetch users
+  const users = await User.find({ _id: { $in: userIds } })
+    .select('_id fullName username profileImage');
+
+  // Create a map for quick lookup
+  const userMap = new Map();
+  users.forEach(user => {
+    userMap.set(user._id.toString(), {
+      _id: user._id,
+      fullName: user.fullName,
+      username: user.username,
+      profileImage: user.profileImage
+    });
+  });
+
+  // Replace user IDs with populated user objects
+  // Check if event is Mongoose document (has .set method) or plain object
+  const isMongooseDoc = event.set && typeof event.set === 'function';
+  
+  // Create a map of invitee IDs from EventInvitation if needed
+  let inviteeMap = new Map();
+  if (entriesWithoutUser.length > 0 && event._id) {
+    const invitations = await EventInvitation.find({ event: event._id })
+      .select('invitee');
+    invitations.forEach(inv => {
+      inviteeMap.set(inv._id.toString(), inv.invitee.toString());
+    });
+  }
+
+  if (isMongooseDoc) {
+    // Mongoose document - modify directly
+    event.invited_friends = await Promise.all(
+      event.invited_friends.map(async (inv, index) => {
+        // Handle new format: inv has user field
+        if (inv.user) {
+          const userId = typeof inv.user === 'string' 
+            ? inv.user 
+            : (inv.user && inv.user.constructor && inv.user.constructor.name === 'ObjectId'
+              ? inv.user.toString()
+              : (inv.user?._id || inv.user));
+          const populatedUser = userId ? userMap.get(userId.toString()) : null;
+
+          return {
+            user: populatedUser || inv.user,
+            status: inv.status || 'pending',
+            updatedAt: inv.updatedAt || new Date()
+          };
+        }
+        
+        // If no user field, try to get from EventInvitation using index or _id
+        // This is a fallback - ideally all entries should have user field
+        let userId = null;
+        if (inv._id && inviteeMap.has(inv._id.toString())) {
+          userId = inviteeMap.get(inv._id.toString());
+        } else if (event._id) {
+          // Get all invitations and match by index (not ideal but works)
+          const allInvitations = await EventInvitation.find({ event: event._id })
+            .select('invitee')
+            .sort({ createdAt: 1 });
+          if (allInvitations[index]) {
+            userId = allInvitations[index].invitee.toString();
+          }
+        }
+        
+        const populatedUser = userId ? userMap.get(userId) : null;
+        
+        return {
+          user: populatedUser || null,
+          status: inv.status || 'pending',
+          updatedAt: inv.updatedAt || new Date()
+        };
+      })
+    );
+  } else {
+    // Plain object - return new object with populated users
+    const populatedInvitedFriends = await Promise.all(
+      event.invited_friends.map(async (inv, index) => {
+        // Handle new format: inv has user field
+        if (inv.user) {
+          const userId = typeof inv.user === 'string' 
+            ? inv.user 
+            : (inv.user && inv.user.constructor && inv.user.constructor.name === 'ObjectId'
+              ? inv.user.toString()
+              : (inv.user?._id || inv.user));
+          const populatedUser = userId ? userMap.get(userId.toString()) : null;
+
+          return {
+            user: populatedUser || inv.user,
+            status: inv.status || 'pending',
+            updatedAt: inv.updatedAt || new Date()
+          };
+        }
+        
+        // If no user field, try to get from EventInvitation
+        let userId = null;
+        if (inv._id && inviteeMap.has(inv._id.toString())) {
+          userId = inviteeMap.get(inv._id.toString());
+        } else if (event._id) {
+          const allInvitations = await EventInvitation.find({ event: event._id })
+            .select('invitee')
+            .sort({ createdAt: 1 });
+          if (allInvitations[index]) {
+            userId = allInvitations[index].invitee.toString();
+          }
+        }
+        
+        const populatedUser = userId ? userMap.get(userId) : null;
+        
+        return {
+          user: populatedUser || null,
+          status: inv.status || 'pending',
+          updatedAt: inv.updatedAt || new Date()
+        };
+      })
+    );
+    
+    event.invited_friends = populatedInvitedFriends;
+  }
+
+  return event;
+};
+
 // @desc    Create new event
 // @route   POST /api/events
 // @access  Private
@@ -113,24 +299,25 @@ exports.createEvent = async (req, res) => {
     }
 
     // Validate invited_friends if provided
-    let validFriendIds = [];
+    let invitedFriendsArray = [];
     if (invited_friends !== undefined && invited_friends !== null) {
       // If empty array or null, set to empty array
       if (Array.isArray(invited_friends)) {
         if (invited_friends.length > 0) {
           // Verify all friend IDs exist
           const friendUsers = await User.find({ _id: { $in: invited_friends } });
-          validFriendIds = friendUsers.map(u => u._id);
+          const validFriendIds = friendUsers.map(u => u._id);
           
-          // Optionally: Check if they are actually friends (uncomment if you have friendship validation)
-          // const userWithFriends = await User.findById(req.user.id);
-          // validFriendIds = validFriendIds.filter(fid => 
-          //   userWithFriends.friends.some(f => f.toString() === fid.toString())
-          // );
+          // Create array of objects with status 'pending'
+          invitedFriendsArray = validFriendIds.map(friendId => ({
+            user: friendId,
+            status: 'pending',
+            updatedAt: new Date()
+          }));
         }
-        // If array is empty, validFriendIds remains []
+        // If array is empty, invitedFriendsArray remains []
       }
-      // If not an array, validFriendIds remains []
+      // If not an array, invitedFriendsArray remains []
     }
 
     // Create the event
@@ -146,14 +333,14 @@ exports.createEvent = async (req, res) => {
       meeting_link: meeting_link || null,
       creator: req.user.id,
       wishlist: wishlist_id || null,
-      invited_friends: validFriendIds 
+      invited_friends: invitedFriendsArray 
     });
 
     // Create EventInvitation records for invited friends
-    if (validFriendIds.length > 0) {
-      const invitations = validFriendIds.map(friendId => ({
+    if (invitedFriendsArray.length > 0) {
+      const invitations = invitedFriendsArray.map(invitedFriend => ({
         event: event._id,
-        invitee: friendId,
+        invitee: invitedFriend.user,
         inviter: req.user.id,
         status: 'pending'
       }));
@@ -165,10 +352,13 @@ exports.createEvent = async (req, res) => {
     }
 
     // Populate and return the created event
-    const populatedEvent = await Event.findById(event._id)
+    let populatedEvent = await Event.findById(event._id)
       .populate('creator', 'fullName username profileImage')
       .populate('wishlist', 'name description')
-      .populate('invited_friends', 'fullName username profileImage');
+      .populate('invited_friends.user', 'fullName username profileImage');
+
+    // Ensure invited_friends.user is populated (manual populate as fallback)
+    await populateInvitedFriends(populatedEvent);
 
     res.status(201).json({
       success: true,
@@ -187,7 +377,25 @@ exports.createEvent = async (req, res) => {
         location: populatedEvent.location,
         meeting_link: populatedEvent.meeting_link,
         wishlist_id: populatedEvent.wishlist ? populatedEvent.wishlist._id : null,
-        invited_friends: Array.isArray(populatedEvent.invited_friends) ? populatedEvent.invited_friends : [],
+        invited_friends: Array.isArray(populatedEvent.invited_friends) 
+          ? populatedEvent.invited_friends.map(inv => {
+              const userData = inv.user;
+              const isPopulated = userData && typeof userData === 'object' && userData.fullName;
+              
+              return {
+                user: isPopulated 
+                  ? {
+                      _id: userData._id,
+                      fullName: userData.fullName,
+                      username: userData.username,
+                      profileImage: userData.profileImage
+                    }
+                  : userData,
+                status: inv.status || 'pending',
+                updatedAt: inv.updatedAt || new Date()
+              };
+            }) 
+          : [],
         created_at: populatedEvent.createdAt.toISOString(),
         updated_at: populatedEvent.updatedAt.toISOString()
       }
@@ -239,7 +447,7 @@ exports.getMyEvents = async (req, res) => {
     const createdEvents = await Event.find(createdQuery)
       .populate('creator', 'fullName username profileImage')
       .populate('wishlist', 'name description')
-      .populate('invited_friends', 'fullName username profileImage')
+      .populate('invited_friends.user', 'fullName username profileImage')
       .sort({ date: 1 });
 
     // Get events where user is invited
@@ -249,7 +457,7 @@ exports.getMyEvents = async (req, res) => {
         populate: [
           { path: 'creator', select: 'fullName username profileImage' },
           { path: 'wishlist', select: 'name description' },
-          { path: 'invited_friends', select: 'fullName username profileImage' }
+          { path: 'invited_friends.user', select: 'fullName username profileImage' }
         ]
       });
 
@@ -260,11 +468,74 @@ exports.getMyEvents = async (req, res) => {
         invitation_status: inv.status
       }));
 
+    // Populate invited_friends.user if needed and transform events
+    const transformedCreatedEvents = await Promise.all(
+      createdEvents.map(async (event) => {
+        await populateInvitedFriends(event);
+        const eventObj = event.toObject();
+        if (eventObj.invited_friends && Array.isArray(eventObj.invited_friends)) {
+          eventObj.invited_friends = eventObj.invited_friends.map(inv => {
+            const userData = inv.user;
+            const isPopulated = userData && typeof userData === 'object' && userData.fullName;
+            
+            return {
+              user: isPopulated 
+                ? {
+                    _id: userData._id,
+                    fullName: userData.fullName,
+                    username: userData.username,
+                    profileImage: userData.profileImage
+                  }
+                : userData,
+              status: inv.status || 'pending',
+              updatedAt: inv.updatedAt || new Date()
+            };
+          });
+        }
+        return eventObj;
+      })
+    );
+
+    // Transform invited events - use EventInvitation as source of truth
+    const transformedInvitedEvents = await Promise.all(
+      invitedEvents.map(async (event) => {
+        const eventObj = { ...event };
+        
+        // Get user data from EventInvitation collection
+        const invitations = await EventInvitation.find({ event: event._id })
+          .select('invitee status updatedAt')
+          .populate('invitee', '_id fullName username profileImage')
+          .sort({ createdAt: 1 });
+
+        // Transform invited_friends using EventInvitation data
+        if (invitations.length > 0) {
+          eventObj.invited_friends = invitations.map((invitation) => {
+            const invitee = invitation.invitee;
+            
+            return {
+              user: invitee ? {
+                _id: invitee._id,
+                fullName: invitee.fullName,
+                username: invitee.username,
+                profileImage: invitee.profileImage
+              } : null,
+              status: invitation.status || 'pending',
+              updatedAt: invitation.updatedAt || invitation.createdAt || new Date()
+            };
+          });
+        } else {
+          eventObj.invited_friends = [];
+        }
+        
+        return eventObj;
+      })
+    );
+
     res.status(200).json({
       success: true,
       data: {
-        created: createdEvents,
-        invited: invitedEvents
+        created: transformedCreatedEvents,
+        invited: transformedInvitedEvents
       }
     });
   } catch (error) {
@@ -286,7 +557,7 @@ exports.getEventById = async (req, res) => {
     const event = await Event.findById(id)
       .populate('creator', 'fullName username profileImage')
       .populate('wishlist', 'name description items')
-      .populate('invited_friends', 'fullName username profileImage');
+      .populate('invited_friends.user', 'fullName username profileImage');
 
     if (!event) {
       return res.status(404).json({
@@ -297,7 +568,9 @@ exports.getEventById = async (req, res) => {
 
     // Check access based on privacy
     const isCreator = event.creator._id.toString() === req.user.id;
-    const isInvited = event.invited_friends.some(f => f._id.toString() === req.user.id);
+    // Check if user is invited using EventInvitation collection
+    const userInvitation = await EventInvitation.findOne({ event: id, invitee: req.user.id });
+    const isInvited = !!userInvitation;
 
     if (event.privacy === 'private' && !isCreator && !isInvited) {
       return res.status(403).json({
@@ -306,7 +579,13 @@ exports.getEventById = async (req, res) => {
       });
     }
 
-    // Get invitation stats
+    // Get user data from EventInvitation collection (more reliable source)
+    const invitations = await EventInvitation.find({ event: id })
+      .select('invitee status updatedAt')
+      .populate('invitee', '_id fullName username profileImage')
+      .sort({ createdAt: 1 });
+
+    // Calculate stats from EventInvitation collection (more reliable)
     const invitationStats = await EventInvitation.aggregate([
       { $match: { event: event._id } },
       {
@@ -318,7 +597,7 @@ exports.getEventById = async (req, res) => {
     ]);
 
     const stats = {
-      total_invited: event.invited_friends.length,
+      total_invited: invitations.length,
       pending: 0,
       accepted: 0,
       declined: 0,
@@ -329,11 +608,27 @@ exports.getEventById = async (req, res) => {
       stats[stat._id] = stat.count;
     });
 
+    // Transform invited_friends using EventInvitation data as source of truth
+    const transformedInvitedFriends = invitations.map((invitation) => {
+      const invitee = invitation.invitee;
+      
+      return {
+        user: invitee ? {
+          _id: invitee._id,
+          fullName: invitee.fullName,
+          username: invitee.username,
+          profileImage: invitee.profileImage
+        } : null,
+        status: invitation.status || 'pending',
+        updatedAt: invitation.updatedAt || invitation.createdAt || new Date()
+      };
+    });
+
     res.status(200).json({
       success: true,
       data: {
         ...event.toObject(),
-        invited_friends: event.invited_friends || []
+        invited_friends: transformedInvitedFriends
       },
       stats
     });
@@ -382,18 +677,37 @@ exports.updateEvent = async (req, res) => {
     });
 
     // Handle invited_friends separately (not in allowedFields because it needs validation)
-    let validFriendIds = null;
+    let invitedFriendsArray = null;
     if (updates.hasOwnProperty('invited_friends')) {
       const { invited_friends } = updates;
       
       if (invited_friends && Array.isArray(invited_friends)) {
-        // Validate friend IDs exist
+        // Validate friend IDs exist and create array of objects with status
         const friendUsers = await User.find({ _id: { $in: invited_friends } });
-        validFriendIds = friendUsers.map(u => u._id);
+        const validFriendIds = friendUsers.map(u => u._id);
+        
+        // Get existing invited friends to preserve their statuses
+        const existingInvitedFriends = event.invited_friends || [];
+        const existingFriendMap = new Map();
+        existingInvitedFriends.forEach(inv => {
+          if (inv.user) {
+            existingFriendMap.set(inv.user.toString(), inv.status);
+          }
+        });
+        
+        // Create array of objects, preserving existing statuses or setting to 'pending'
+        invitedFriendsArray = validFriendIds.map(friendId => {
+          const existingStatus = existingFriendMap.get(friendId.toString());
+          return {
+            user: friendId,
+            status: existingStatus || 'pending',
+            updatedAt: existingStatus ? existingInvitedFriends.find(inv => inv.user && inv.user.toString() === friendId.toString())?.updatedAt || new Date() : new Date()
+          };
+        });
       } else {
-        validFriendIds = [];
+        invitedFriendsArray = [];
       }
-      filteredUpdates.invited_friends = validFriendIds;
+      filteredUpdates.invited_friends = invitedFriendsArray;
     }
 
     // Validate meeting_link if mode is being updated
@@ -414,20 +728,20 @@ exports.updateEvent = async (req, res) => {
     )
       .populate('creator', 'fullName username profileImage')
       .populate('wishlist', 'name description')
-      .populate('invited_friends', 'fullName username profileImage');
+      .populate('invited_friends.user', 'fullName username profileImage');
     
     // Update EventInvitation records if invited_friends was updated
-    if (validFriendIds !== null) {
+    if (invitedFriendsArray !== null) {
       // Remove old invitations
       await EventInvitation.deleteMany({ event: id });
       
       // Create new invitations for valid friends
-      if (validFriendIds.length > 0) {
-        const invitations = validFriendIds.map(friendId => ({
+      if (invitedFriendsArray.length > 0) {
+        const invitations = invitedFriendsArray.map(invitedFriend => ({
           event: id,
-          invitee: friendId,
+          invitee: invitedFriend.user,
           inviter: req.user.id,
-          status: 'pending'
+          status: invitedFriend.status || 'pending'
         }));
 
         await EventInvitation.insertMany(invitations, { ordered: false }).catch(err => {
@@ -436,13 +750,35 @@ exports.updateEvent = async (req, res) => {
       }
       
       // Re-populate the event to get updated invited_friends
-      await updatedEvent.populate('invited_friends', 'fullName username profileImage');
+      await updatedEvent.populate('invited_friends.user', 'fullName username profileImage');
     }
+
+    // Transform invited_friends to ensure user is properly formatted
+    const transformedInvitedFriends = (updatedEvent.invited_friends || []).map(inv => {
+      const userData = inv.user;
+      const isPopulated = userData && typeof userData === 'object' && userData.fullName;
+      
+      return {
+        user: isPopulated 
+          ? {
+              _id: userData._id,
+              fullName: userData.fullName,
+              username: userData.username,
+              profileImage: userData.profileImage
+            }
+          : userData,
+        status: inv.status || 'pending',
+        updatedAt: inv.updatedAt || new Date()
+      };
+    });
+
+    const eventData = updatedEvent.toObject();
+    eventData.invited_friends = transformedInvitedFriends;
 
     res.status(200).json({
       success: true,
       message: 'Event updated successfully',
-      data: updatedEvent
+      data: eventData
     });
   } catch (error) {
     console.error('Update Event Error:', error);
@@ -557,7 +893,7 @@ exports.linkWishlist = async (req, res) => {
 
     const updatedEvent = await Event.findById(id)
       .populate('wishlist', 'name description')
-      .populate('invited_friends', 'fullName username profileImage');
+      .populate('invited_friends.user', 'fullName username profileImage');
 
     res.status(200).json({
       success: true,
@@ -636,11 +972,28 @@ exports.inviteFriends = async (req, res) => {
     if (newInvitations.length > 0) {
       await EventInvitation.insertMany(newInvitations);
 
-      // Add to event's invited_friends array
-      const newFriendIds = newInvitations.map(inv => inv.invitee);
-      await Event.findByIdAndUpdate(id, {
-        $addToSet: { invited_friends: { $each: newFriendIds } }
-      });
+      // Add to event's invited_friends array with status 'pending'
+      const newInvitedFriends = newInvitations.map(inv => ({
+        user: inv.invitee,
+        status: 'pending',
+        updatedAt: new Date()
+      }));
+
+      // Get existing invited friends
+      const existingInvitedFriends = event.invited_friends || [];
+      const existingUserIds = existingInvitedFriends.map(inv => 
+        inv.user ? inv.user.toString() : null
+      ).filter(Boolean);
+
+      // Only add friends that aren't already invited
+      const friendsToAdd = newInvitedFriends.filter(inv => 
+        !existingUserIds.includes(inv.user.toString())
+      );
+
+      if (friendsToAdd.length > 0) {
+        event.invited_friends = [...existingInvitedFriends, ...friendsToAdd];
+        await event.save();
+      }
     }
 
     res.status(200).json({
@@ -706,6 +1059,19 @@ exports.respondToInvitation = async (req, res) => {
     invitation.respondedAt = new Date();
     await invitation.save();
 
+    // Update status in event's invited_friends array
+    const eventDoc = await Event.findById(id);
+    if (eventDoc && eventDoc.invited_friends) {
+      const friendInvitation = eventDoc.invited_friends.find(
+        inv => inv.user && inv.user.toString() === req.user.id.toString()
+      );
+      if (friendInvitation) {
+        friendInvitation.status = responseStatus;
+        friendInvitation.updatedAt = new Date();
+        await eventDoc.save();
+      }
+    }
+
     // Get the responding user's info for the notification
     const respondingUser = await User.findById(req.user.id).select('fullName username profileImage');
     if (!respondingUser) {
@@ -767,22 +1133,15 @@ exports.respondToInvitation = async (req, res) => {
     }
 
     // Get the updated event with populated fields
-    const updatedEvent = await Event.findById(id)
+    let updatedEvent = await Event.findById(id)
       .populate('creator', 'fullName username profileImage')
       .populate('wishlist', 'name description items')
-      .populate('invited_friends', 'fullName username profileImage');
+      .populate('invited_friends.user', 'fullName username profileImage');
 
-    // Get invitation stats for the response
-    const invitationStats = await EventInvitation.aggregate([
-      { $match: { event: event._id } },
-      {
-        $group: {
-          _id: '$status',
-          count: { $sum: 1 }
-        }
-      }
-    ]);
+    // Ensure invited_friends.user is populated (manual populate as fallback)
+    await populateInvitedFriends(updatedEvent);
 
+    // Calculate stats from invited_friends array
     const stats = {
       total_invited: updatedEvent.invited_friends.length,
       pending: 0,
@@ -791,8 +1150,31 @@ exports.respondToInvitation = async (req, res) => {
       maybe: 0
     };
 
-    invitationStats.forEach(stat => {
-      stats[stat._id] = stat.count;
+    updatedEvent.invited_friends.forEach(invitedFriend => {
+      if (invitedFriend.status) {
+        stats[invitedFriend.status] = (stats[invitedFriend.status] || 0) + 1;
+      } else {
+        stats.pending = (stats.pending || 0) + 1;
+      }
+    });
+
+    // Transform invited_friends to ensure user is properly formatted
+    const transformedInvitedFriends = (updatedEvent.invited_friends || []).map(inv => {
+      const userData = inv.user;
+      const isPopulated = userData && typeof userData === 'object' && userData.fullName;
+      
+      return {
+        user: isPopulated 
+          ? {
+              _id: userData._id,
+              fullName: userData.fullName,
+              username: userData.username,
+              profileImage: userData.profileImage
+            }
+          : userData,
+        status: inv.status || 'pending',
+        updatedAt: inv.updatedAt || new Date()
+      };
     });
 
     res.status(200).json({
@@ -800,7 +1182,7 @@ exports.respondToInvitation = async (req, res) => {
       message: `Invitation ${responseStatus} successfully`,
       data: {
         ...updatedEvent.toObject(),
-        invited_friends: updatedEvent.invited_friends || []
+        invited_friends: transformedInvitedFriends
       },
       invitation: {
         _id: invitation._id,
@@ -838,16 +1220,44 @@ exports.getPublicEvents = async (req, res) => {
 
     const events = await Event.find(query)
       .populate('creator', 'fullName username profileImage')
-      .populate('invited_friends', 'fullName username profileImage')
+      .populate('invited_friends.user', 'fullName username profileImage')
       .sort({ date: 1 })
       .skip((page - 1) * limit)
       .limit(parseInt(limit));
 
     const total = await Event.countDocuments(query);
 
+    // Populate invited_friends.user if needed and transform events
+    const transformedEvents = await Promise.all(
+      events.map(async (event) => {
+        await populateInvitedFriends(event);
+        const eventObj = event.toObject();
+        if (eventObj.invited_friends && Array.isArray(eventObj.invited_friends)) {
+          eventObj.invited_friends = eventObj.invited_friends.map(inv => {
+            const userData = inv.user;
+            const isPopulated = userData && typeof userData === 'object' && userData.fullName;
+            
+            return {
+              user: isPopulated 
+                ? {
+                    _id: userData._id,
+                    fullName: userData.fullName,
+                    username: userData.username,
+                    profileImage: userData.profileImage
+                  }
+                : userData,
+              status: inv.status || 'pending',
+              updatedAt: inv.updatedAt || new Date()
+            };
+          });
+        }
+        return eventObj;
+      })
+    );
+
     res.status(200).json({
       success: true,
-      data: events,
+      data: transformedEvents,
       pagination: {
         current_page: parseInt(page),
         total_pages: Math.ceil(total / limit),
