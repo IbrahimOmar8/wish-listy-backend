@@ -1089,9 +1089,12 @@ exports.respondToInvitation = async (req, res) => {
         'maybe': 'might attend'
       };
 
+      // Set notification type based on response status
+      const notificationType = `event_invitation_${responseStatus}`;
+
       await Notification.create({
         user: event.creator,
-        type: 'event_invitation',
+        type: notificationType,
         title: 'Event Invitation Response',
         message: `${respondingUser.fullName} ${statusMessages[responseStatus]} your invitation to: ${event.name}`,
         relatedUser: req.user.id,
