@@ -10,14 +10,15 @@ const notificationSchema = new mongoose.Schema({
   type: {
     type: String,
     enum: [
-      'friend_request', 
-      'friend_request_accepted', 
-      'friend_request_rejected', 
+      'friend_request',
+      'friend_request_accepted',
+      'friend_request_rejected',
       'event_invitation',
       'event_invitation_accepted',
       'event_invitation_declined',
       'event_invitation_maybe',
-      'item_purchased', 
+      'item_purchased',
+      'item_reserved',
       'wishlist_shared'
     ],
     required: true

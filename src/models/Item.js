@@ -58,6 +58,11 @@ const itemSchema = new mongoose.Schema({
     enum: ['low', 'medium', 'high'],
     default: 'medium'
   },
+  quantity: {
+    type: Number,
+    default: 1,
+    min: 1
+  },
   createdAt: {
     type: Date,
     default: Date.now

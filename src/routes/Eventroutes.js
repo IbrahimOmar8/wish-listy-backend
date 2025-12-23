@@ -11,6 +11,10 @@ const {
   respondToInvitation,
   getPublicEvents
 } = require('../controllers/Eventcontroller');
+const {
+  getEventAttendees,
+  getEventWishlists
+} = require('../controllers/friendProfileController');
 const { protect } = require('../middleware/auth');
 
 // All routes require authentication
@@ -37,5 +41,9 @@ router.post('/:id/invite', inviteFriends);
 // Support both PUT and PATCH for responding to invitations
 router.put('/:id/respond', respondToInvitation);
 router.patch('/:id/respond', respondToInvitation);
+
+// Event attendees and wishlists
+router.get('/:eventId/attendees', getEventAttendees);
+router.get('/:eventId/wishlists', getEventWishlists);
 
 module.exports = router;

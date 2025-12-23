@@ -1,5 +1,6 @@
 const Wishlist = require('../models/Wishlist');
 const Item = require('../models/Item');
+const Reservation = require('../models/Reservation');
 
 exports.createWishlist = async (req, res) => {
   try {
@@ -60,6 +61,7 @@ exports.getMyWishlists = async (req, res) => {
 exports.getWishlistById = async (req, res) => {
   try {
     const { id } = req.params;
+    const viewerId = req.user.id;
 
     const wishlist = await Wishlist.findById(id)
       .populate({
@@ -79,6 +81,75 @@ exports.getWishlistById = async (req, res) => {
       });
     }
 
+    const isOwner = wishlist.owner._id.toString() === viewerId;
+
+    // Get all reservations for items in this wishlist
+    const itemIds = wishlist.items.map(item => item._id);
+    const reservations = await Reservation.find({
+      item: { $in: itemIds },
+      status: 'reserved'
+    });
+
+    // Create a map of item reservations
+    const reservationMap = {};
+    reservations.forEach(res => {
+      const itemId = res.item.toString();
+      if (!reservationMap[itemId]) {
+        reservationMap[itemId] = {
+          totalReserved: 0,
+          reservedByMe: false
+        };
+      }
+      reservationMap[itemId].totalReserved += res.quantity;
+      if (res.reserver.toString() === viewerId) {
+        reservationMap[itemId].reservedByMe = true;
+      }
+    });
+
+    // Add item status based on viewer perspective
+    const itemsWithStatus = wishlist.items.map(item => {
+      const itemObj = item.toObject();
+      const resInfo = reservationMap[item._id.toString()] || { totalReserved: 0, reservedByMe: false };
+
+      let itemStatus;
+
+      if (item.isPurchased) {
+        // Item marked as gifted by owner
+        itemStatus = 'gifted';
+      } else if (resInfo.totalReserved >= item.quantity) {
+        // Fully reserved
+        if (isOwner) {
+          // Owner sees it as available to maintain surprise
+          itemStatus = 'available';
+        } else {
+          // Friends see it as reserved
+          itemStatus = 'reserved';
+        }
+      } else if (resInfo.totalReserved > 0) {
+        // Partially reserved
+        if (isOwner) {
+          itemStatus = 'available'; // Maintain surprise for owner
+        } else {
+          itemStatus = 'available'; // Still available for more reservations
+        }
+      } else {
+        // Not reserved at all
+        itemStatus = 'available';
+      }
+
+      return {
+        ...itemObj,
+        itemStatus,
+        availableQuantity: isOwner ? item.quantity : item.quantity - resInfo.totalReserved,
+        isReservedByMe: resInfo.reservedByMe,
+        // Don't show reservation details to owner (maintain surprise)
+        ...(isOwner ? {} : {
+          totalReserved: resInfo.totalReserved,
+          remainingQuantity: item.quantity - resInfo.totalReserved
+        })
+      };
+    });
+
     // Additional statistics
     const stats = {
       totalItems: wishlist.items.length,
@@ -88,8 +159,12 @@ exports.getWishlistById = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      wishlist,
-      stats
+      wishlist: {
+        ...wishlist.toObject(),
+        items: itemsWithStatus
+      },
+      stats,
+      isOwner
     });
   } catch (error) {
     console.error('Get Wishlist Error:', error);
