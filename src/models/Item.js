@@ -35,18 +35,14 @@ const itemSchema = new mongoose.Schema({
     type: String,
     default: null
   },
-  isPurchased: {
-    type: Boolean,
-    default: false
-  },
-  purchasedBy: {
+  reservedBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
     default: null
   },
-  purchasedAt: {
-    type: Date,
-    default: null
+  isReceived: {
+    type: Boolean,
+    default: false
   },
   wishlist: {
     type: mongoose.Schema.Types.ObjectId,

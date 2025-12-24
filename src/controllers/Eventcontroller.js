@@ -572,6 +572,9 @@ exports.getEventById = async (req, res) => {
     const userInvitation = await EventInvitation.findOne({ event: id, invitee: req.user.id });
     const isInvited = !!userInvitation;
 
+    // Extract myInvitationStatus for the current user
+    const myInvitationStatus = userInvitation ? (userInvitation.status || 'pending') : 'not_invited';
+
     if (event.privacy === 'private' && !isCreator && !isInvited) {
       return res.status(403).json({
         success: false,
@@ -624,11 +627,35 @@ exports.getEventById = async (req, res) => {
       };
     });
 
+    // Get attendees (accepted/maybe) for social proof (excluding current user)
+    const acceptedAttendees = await EventInvitation.find({
+      event: id,
+      status: { $in: ['accepted', 'maybe'] },
+      invitee: { $ne: req.user.id } // Exclude current user
+    })
+      .populate('invitee', 'fullName username profileImage')
+      .sort({ updatedAt: -1 }) // Most recent responses first
+      .limit(10); // Top 10 for social proof
+
+    // Compute status dynamically based on event date vs current time
+    const eventDate = new Date(event.date);
+    const now = new Date();
+    const computedStatus = eventDate < now ? 'past' : 'upcoming';
+
     res.status(200).json({
       success: true,
       data: {
         ...event.toObject(),
-        invited_friends: transformedInvitedFriends
+        isCreator, // ✅ Boolean indicating if current user is the creator
+        myInvitationStatus, // ✅ Current user's invitation status ('pending', 'accepted', 'declined', 'maybe', or 'not_invited')
+        status: computedStatus, // ✅ Dynamically computed status ('past' or 'upcoming')
+        invited_friends: transformedInvitedFriends,
+        attendees: acceptedAttendees.map(inv => ({
+          _id: inv.invitee._id,
+          fullName: inv.invitee.fullName,
+          username: inv.invitee.username,
+          profileImage: inv.invitee.profileImage
+        })) // ✅ Accepted/maybe attendees for social proof
       },
       stats
     });
@@ -1023,7 +1050,7 @@ exports.respondToInvitation = async (req, res) => {
     const { response, status } = req.body;
     const responseStatus = response || status;
 
-    const validResponses = ['accepted', 'declined', 'maybe'];
+    const validResponses = ['accepted', 'declined', 'maybe', 'pending'];
     if (!responseStatus || !validResponses.includes(responseStatus)) {
       return res.status(400).json({
         success: false,
@@ -1081,12 +1108,14 @@ exports.respondToInvitation = async (req, res) => {
       });
     }
 
-    // Create notification for the event creator (only if status changed)
-    if (previousStatus !== responseStatus && event.creator.toString() !== req.user.id) {
+    // Create notification for the event creator (only if status changed and not pending)
+    // Don't send notification when status is reset to 'pending' (user is undoing their response)
+    if (previousStatus !== responseStatus && event.creator.toString() !== req.user.id && responseStatus !== 'pending') {
       const statusMessages = {
         'accepted': 'accepted',
         'declined': 'declined',
-        'maybe': 'might attend'
+        'maybe': 'might attend',
+        'pending': 'reset their response to pending'
       };
 
       // Set notification type based on response status
@@ -1117,8 +1146,13 @@ exports.respondToInvitation = async (req, res) => {
       // Calculate creator's current unreadCount with badge dismissal logic
       const unreadCount = await getUnreadCountWithBadge(event.creator);
 
-      // Emit socket event if io is available
-      if (req.app.get('io')) {
+      // Emit socket event if io is available (only if not pending)
+      if (req.app.get('io') && responseStatus !== 'pending') {
+        const statusMessages = {
+          'accepted': 'accepted',
+          'declined': 'declined',
+          'maybe': 'might attend'
+        };
         req.app.get('io').to(event.creator.toString()).emit('event_invitation_response', {
           eventId: event._id,
           eventName: event.name,

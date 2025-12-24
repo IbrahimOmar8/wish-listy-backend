@@ -19,6 +19,12 @@ router.put('/:id', itemController.updateItem);
 // Mark Item as Purchased
 router.put('/:id/purchase', itemController.markItemAsPurchased);
 
+// Toggle item reservation (guest action)
+router.put('/:id/reserve', itemController.toggleItemReservation);
+
+// Update item status - isReceived (owner action)
+router.put('/:id/status', itemController.updateItemStatus);
+
 // Delete Item
 router.delete('/:id', itemController.deleteItem);
 
