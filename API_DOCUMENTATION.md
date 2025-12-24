@@ -111,7 +111,7 @@ Authorization: Bearer <token>
 
 ---
 
-### 2. بروفايل الصديق (Friend Profile)
+### 2. بروفايل الصديق (Friend Profile) //////////////////////////////////////////
 
 #### عرض بروفايل صديق
 ```
@@ -147,7 +147,7 @@ Authorization: Bearer <token>
 }
 ```
 
----
+--- //////////////////////////////////////////
 
 #### عرض قوائم أمنيات صديق (مع تطبيق الخصوصية)
 ```
@@ -248,6 +248,78 @@ Authorization: Bearer <token>
 
 ### 3. تفاصيل الحدث (Event Details)
 
+#### عرض تفاصيل حدث (لصديق أو لك)
+```
+GET /api/events/:eventId
+```
+
+**Headers:**
+```
+Authorization: Bearer <token>
+```
+
+**Response (Success - 200):**
+```json
+{
+  "success": true,
+  "data": {
+    "_id": "event_id",
+    "name": "Birthday Party",
+    "description": "My 25th birthday celebration",
+    "date": "2025-02-15T...",
+    "time": "18:00",
+    "type": "birthday",
+    "privacy": "friends_only",
+    "mode": "in_person",
+    "location": "Cairo, Egypt",
+    "creator": {
+      "_id": "creator_id",
+      "fullName": "Friend Name",
+      "username": "friend_username",
+      "profileImage": "profile_image_url"
+    },
+    "wishlist": {
+      "_id": "wishlist_id",
+      "name": "Birthday Wishlist",
+      "description": "...",
+      "items": [...]
+    },
+    "invited_friends": [
+      {
+        "user": {
+          "_id": "user_id",
+          "fullName": "Ahmed Ali",
+          "username": "ahmed_ali",
+          "profileImage": "image_url"
+        },
+        "status": "accepted",
+        "updatedAt": "2025-01-15T..."
+      }
+    ]
+  },
+  "stats": {
+    "total_invited": 10,
+    "pending": 2,
+    "accepted": 7,
+    "declined": 1,
+    "maybe": 0
+  }
+}
+```
+
+**قواعد الخصوصية والوصول:**
+- **`public`**: يمكن لأي مستخدم موثق مشاهدته
+- **`friends_only`**: يمكن للأصدقاء فقط مشاهدته
+- **`private`**: يمكن للمدعوين والمالك فقط مشاهدته
+- إذا لم تكن لديك صلاحية الوصول → `403 Forbidden`
+
+**ملاحظات:**
+- يمكن استخدام هذا الـ API لعرض تفاصيل أي event (سواء كان لك أو لصديق)
+- يتم التحقق من قواعد الخصوصية تلقائياً
+- إذا كان الـ event لصديق، يمكنك رؤية تفاصيله إذا كان `public` أو `friends_only` (وأنت صديقه) أو `private` (وأنت مدعو)
+
+---
+
 #### عرض المدعوين لحدث
 ```
 GET /api/events/:eventId/attendees
@@ -343,7 +415,7 @@ Authorization: Bearer <token>
 - العناصر تأتي مع حالتها (`available`, `reserved`, `gifted`)
 - المالك لا يرى تفاصيل الحجز للحفاظ على المفاجأة
 
----
+---///////////////////////
 
 ### 4. تحديثات على API تفاصيل Wishlist
 
@@ -496,10 +568,12 @@ socket.on('item_reserved', (data) => {
    GET /api/users/123/events
    ```
 
-2. **عرض تفاصيل حدث:**
+2. **عرض تفاصيل حدث (لصديق):**
    ```
    GET /api/events/456
    ```
+   
+   **ملاحظة:** يمكن استخدام نفس الـ API لعرض تفاصيل event لصديق - يتم التحقق من قواعد الخصوصية تلقائياً
 
 3. **عرض المدعوين:**
    ```
@@ -623,6 +697,12 @@ Authorization: Bearer {{token}}
 **Get Friend Events:**
 ```
 GET {{base_url}}/users/{{friend_id}}/events
+Authorization: Bearer {{token}}
+```
+
+**Get Event Details (Friend's Event):**
+```
+GET {{base_url}}/events/{{event_id}}
 Authorization: Bearer {{token}}
 ```
 

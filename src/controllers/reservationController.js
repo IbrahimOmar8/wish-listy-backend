@@ -44,11 +44,11 @@ exports.reserveItem = async (req, res) => {
       });
     }
 
-    // Check if item is already purchased/gifted
-    if (item.isPurchased) {
+    // Check if item is already received (owner marked as received)
+    if (item.isReceived) {
       return res.status(400).json({
         success: false,
-        message: 'This item has already been marked as gifted',
+        message: 'Cannot reserve an item that has been received',
       });
     }
 
@@ -209,7 +209,7 @@ exports.getMyReservations = async (req, res) => {
     })
       .populate({
         path: 'item',
-        select: 'name description image url priority isPurchased',
+        select: 'name description image url priority isReceived reservedBy',
         populate: {
           path: 'wishlist',
           select: 'name owner',

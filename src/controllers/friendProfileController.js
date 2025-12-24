@@ -4,15 +4,48 @@ const Event = require('../models/Event');
 const EventInvitation = require('../models/Eventinvitation');
 const FriendRequest = require('../models/FriendRequest');
 const Reservation = require('../models/Reservation');
+const Item = require('../models/Item');
 
 /**
- * Helper function to check friendship status
+ * Helper function to check if two users are friends (boolean)
  */
 const checkFriendshipStatus = async (currentUserId, targetUserId) => {
   const user = await User.findById(currentUserId);
   const isFriend = user.friends.includes(targetUserId);
 
   return isFriend;
+};
+
+/**
+ * Helper function to get detailed friendship status
+ * Returns: { status: 'friends'|'pending_sent'|'pending_received'|'none', requestId?: string }
+ */
+const getFriendshipStatus = async (currentUserId, targetUserId) => {
+  // Check if already friends
+  const currentUser = await User.findById(currentUserId).select('friends');
+  const isFriend = currentUser.friends.includes(targetUserId);
+
+  if (isFriend) {
+    return { status: 'friends' };
+  }
+
+  // Check for pending friend requests
+  const pendingRequest = await FriendRequest.findOne({
+    $or: [
+      { from: currentUserId, to: targetUserId, status: 'pending' },
+      { from: targetUserId, to: currentUserId, status: 'pending' }
+    ]
+  });
+
+  if (pendingRequest) {
+    if (pendingRequest.from.toString() === currentUserId) {
+      return { status: 'pending_sent', requestId: pendingRequest._id.toString() };
+    } else {
+      return { status: 'pending_received', requestId: pendingRequest._id.toString() };
+    }
+  }
+
+  return { status: 'none' };
 };
 
 /**
@@ -36,8 +69,8 @@ exports.getFriendProfile = async (req, res) => {
       });
     }
 
-    // Check friendship status
-    const isFriend = await checkFriendshipStatus(currentUserId, friendUserId);
+    // Get detailed friendship status
+    const friendshipStatus = await getFriendshipStatus(currentUserId, friendUserId);
 
     // Get counts
     const [wishlistCount, eventCount, friendCount] = await Promise.all([
@@ -61,9 +94,7 @@ exports.getFriendProfile = async (req, res) => {
           events: eventCount,
           friends: friendCount,
         },
-        friendshipStatus: {
-          isFriend,
-        },
+        friendshipStatus,
       },
     });
   } catch (error) {
@@ -99,16 +130,51 @@ exports.getFriendWishlists = async (req, res) => {
 
     const wishlists = await Wishlist.find(privacyQuery)
       .populate('owner', 'fullName username profileImage')
-      .select('name description privacy category createdAt')
+      .select('name description privacy category createdAt items')
       .sort({ createdAt: -1 });
 
-    // Get item counts for each wishlist
+    // Get item counts and preview items (top 3) for each wishlist
     const wishlistsWithCounts = await Promise.all(
       wishlists.map(async (wishlist) => {
         const itemCount = wishlist.items ? wishlist.items.length : 0;
+        
+        // Get top 3 items (by priority: high -> medium -> low, then by creation date)
+        // Only show non-received items in preview (exclude items owner marked as received)
+        const topItems = wishlist.items && wishlist.items.length > 0
+          ? await Item.aggregate([
+              { $match: { 
+                  _id: { $in: wishlist.items },
+                  isReceived: false
+                }
+              },
+              {
+                $addFields: {
+                  priorityOrder: {
+                    $switch: {
+                      branches: [
+                        { case: { $eq: ['$priority', 'high'] }, then: 3 },
+                        { case: { $eq: ['$priority', 'medium'] }, then: 2 },
+                        { case: { $eq: ['$priority', 'low'] }, then: 1 }
+                      ],
+                      default: 0
+                    }
+                  }
+                }
+              },
+              { $sort: { priorityOrder: -1, createdAt: -1 } },
+              { $limit: 3 },
+              { $project: { name: 1, image: 1, priority: 1, createdAt: 1, _id: 1 } }
+            ])
+          : [];
+
         return {
           ...wishlist.toObject(),
           itemCount,
+          previewItems: topItems.map(item => ({
+            _id: item._id,
+            name: item.name,
+            image: item.image
+          }))
         };
       })
     );
@@ -168,17 +234,64 @@ exports.getFriendEvents = async (req, res) => {
       .populate('wishlist', 'name')
       .sort({ date: 1 });
 
-    // Add invitation status to each event
-    const eventsWithStatus = events.map((event) => {
-      const eventObj = event.toObject();
-      const invitationStatus =
-        invitationStatusMap[event._id.toString()] || 'not_invited';
+    // Add invitation status, attendees (top 3 accepted), and populate invited_friends with user details
+    const eventsWithStatus = await Promise.all(
+      events.map(async (event) => {
+        const eventObj = event.toObject();
+        const invitationStatus =
+          invitationStatusMap[event._id.toString()] || 'not_invited';
 
-      return {
-        ...eventObj,
-        invitationStatus,
-      };
-    });
+        // Get top 3 accepted attendees (excluding current user for social proof)
+        const acceptedAttendees = await EventInvitation.find({
+          event: event._id,
+          status: { $in: ['accepted', 'maybe'] }, // Include both accepted and maybe
+          invitee: { $ne: currentUserId } // Exclude current user
+        })
+          .populate('invitee', 'fullName username profileImage')
+          .sort({ updatedAt: -1 }) // Most recent responses first
+          .limit(3);
+
+        // Get all invited friends with user details from EventInvitation collection (source of truth)
+        const allInvitations = await EventInvitation.find({ event: event._id })
+          .select('invitee status updatedAt')
+          .populate('invitee', '_id fullName username profileImage')
+          .sort({ createdAt: 1 });
+
+        // Transform invited_friends using EventInvitation data with full user details
+        const transformedInvitedFriends = allInvitations.map((invitation) => {
+          const invitee = invitation.invitee;
+
+          return {
+            user: invitee ? {
+              _id: invitee._id,
+              fullName: invitee.fullName,
+              username: invitee.username,
+              profileImage: invitee.profileImage
+            } : null,
+            status: invitation.status || 'pending',
+            updatedAt: invitation.updatedAt || invitation.createdAt || new Date()
+          };
+        });
+
+        // Compute status dynamically based on event date vs current time
+        const eventDate = new Date(event.date);
+        const now = new Date();
+        const computedStatus = eventDate < now ? 'past' : 'upcoming';
+
+        return {
+          ...eventObj,
+          status: computedStatus, // ✅ Override static status with computed dynamic status
+          invitationStatus,
+          invited_friends: transformedInvitedFriends, // ✅ Now includes fullName and user details
+          attendees: acceptedAttendees.map(inv => ({
+            _id: inv.invitee._id,
+            fullName: inv.invitee.fullName,
+            username: inv.invitee.username,
+            profileImage: inv.invitee.profileImage
+          }))
+        };
+      })
+    );
 
     return res.status(200).json({
       success: true,
@@ -364,8 +477,8 @@ exports.getEventWishlists = async (req, res) => {
       .populate({
         path: 'items',
         populate: {
-          path: 'purchasedBy',
-          select: 'fullName username',
+          path: 'reservedBy',
+          select: 'fullName username profileImage',
         },
       })
       .populate('owner', 'fullName username profileImage');
@@ -402,8 +515,12 @@ exports.getEventWishlists = async (req, res) => {
       };
 
       let itemStatus;
-      if (item.isPurchased) {
+      // Check if item is received (owner marked as received)
+      if (item.isReceived) {
         itemStatus = 'gifted';
+      } else if (item.reservedBy) {
+        // Item is reserved/purchased (reservedBy is not null)
+        itemStatus = isWishlistOwner ? 'available' : 'reserved';
       } else if (resInfo.totalReserved >= item.quantity) {
         itemStatus = isWishlistOwner ? 'available' : 'reserved';
       } else {
