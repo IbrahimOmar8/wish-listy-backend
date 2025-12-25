@@ -138,6 +138,41 @@ exports.deleteItem = async (req, res) => {
   }
 };
 
+// @desc    Get all items reserved by the current user
+// @route   GET /api/items/reserved
+// @access  Private
+exports.getMyReservedItems = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    // Find items reserved by current user that haven't been received yet
+    const items = await Item.find({
+      reservedBy: userId,
+      isReceived: false
+    })
+      .populate({
+        path: 'wishlist',
+        select: '_id name description',
+        populate: {
+          path: 'owner',
+          select: '_id fullName username profileImage'
+        }
+      })
+      .sort({ updatedAt: -1 }); // Recently reserved first (updatedAt changes when reserved)
+
+    res.status(200).json({
+      success: true,
+      data: items
+    });
+  } catch (error) {
+    console.error('Get My Reserved Items Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get reserved items'
+    });
+  }
+};
+
 // Other functions remain the same with minor improvements
 exports.getItemsByWishlist = async (req, res) => {
   try {
@@ -158,14 +193,25 @@ exports.getItemsByWishlist = async (req, res) => {
     });
   }
 };
-// Get item by ID with purchaser info
+// @desc    Get item by ID with Owner vs Guest logic
+// @route   GET /api/items/:id
+// @access  Private
 exports.getItemById = async (req, res) => {
   try {
     const { id } = req.params;
+    const viewerId = req.user.id;
 
+    // Find item with wishlist and reservedBy populated
     const item = await Item.findById(id)
       .populate('reservedBy', 'fullName username profileImage')
-      .populate('wishlist', 'owner');
+      .populate({
+        path: 'wishlist',
+        select: '_id name description owner privacy',
+        populate: {
+          path: 'owner',
+          select: '_id fullName username profileImage'
+        }
+      });
     
     if (!item) {
       return res.status(404).json({
@@ -174,9 +220,41 @@ exports.getItemById = async (req, res) => {
       });
     }
 
+    // Check if viewer is the owner of the wishlist
+    const isOwner = item.wishlist.owner._id.toString() === viewerId;
+
+    // Convert to object for manipulation
+    const itemObj = item.toObject();
+
+    // Owner view: Hide reservedBy (spoiler protection), show isReceived
+    if (isOwner) {
+      return res.status(200).json({
+        success: true,
+        item: {
+          ...itemObj,
+          reservedBy: null, // Hide from owner
+          isReceived: itemObj.isReceived || false,
+          wishlist: itemObj.wishlist
+        }
+      });
+    }
+
+    // Guest view: Show reservedBy populated (if exists), show isReceived
+    const responseItem = {
+      ...itemObj,
+      reservedBy: itemObj.reservedBy ? {
+        _id: itemObj.reservedBy._id,
+        fullName: itemObj.reservedBy.fullName,
+        username: itemObj.reservedBy.username,
+        profileImage: itemObj.reservedBy.profileImage
+      } : null,
+      isReceived: itemObj.isReceived || false,
+      wishlist: itemObj.wishlist
+    };
+
     res.status(200).json({
       success: true,
-      item
+      item: responseItem
     });
   } catch (error) {
     console.error('Get Item by ID Error:', error);
