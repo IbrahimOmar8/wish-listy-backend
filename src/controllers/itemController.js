@@ -307,7 +307,6 @@ exports.updateItem = async (req, res) => {
   }
 };
 
-<<<<<<< HEAD
 // @desc    Get all items purchased/reserved by the current user
 // @route   GET /api/items/reserved
 // @access  Private
