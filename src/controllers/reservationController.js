@@ -2,16 +2,18 @@ const Reservation = require('../models/Reservation');
 const Item = require('../models/Item');
 const Wishlist = require('../models/Wishlist');
 const Notification = require('../models/Notification');
-const { emitToUser } = require('../socket');
 
 /**
- * Reserve an item from a friend's wishlist
- * POST /api/items/:itemId/reserve
+ * Toggle reservation (Reserve/Unreserve) for an item
+ * PUT /api/items/:itemId/reserve
+ * Body: { quantity: 1, action: "reserve" | "cancel" } 
+ *       - action is optional: if not provided, will toggle based on current status
+ *       - quantity is optional: defaults to 1
  */
 exports.reserveItem = async (req, res) => {
   try {
     const { itemId } = req.params;
-    const { quantity = 1 } = req.body;
+    const { quantity = 1, action } = req.body;
     const reserverId = req.user.id;
 
     // Validate quantity
@@ -19,6 +21,14 @@ exports.reserveItem = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: 'Quantity must be at least 1',
+      });
+    }
+
+    // Validate action if provided
+    if (action && !['reserve', 'cancel'].includes(action)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Action must be either "reserve" or "cancel"',
       });
     }
 
@@ -52,59 +62,94 @@ exports.reserveItem = async (req, res) => {
       });
     }
 
-    // Calculate total reserved quantity
-    const existingReservations = await Reservation.find({
-      item: itemId,
-      status: 'reserved',
-    });
-
-    const totalReserved = existingReservations.reduce(
-      (sum, res) => sum + res.quantity,
-      0
-    );
-
-    // Check if there's enough quantity available
-    const availableQuantity = item.quantity - totalReserved;
-
-    if (quantity > availableQuantity) {
-      return res.status(400).json({
-        success: false,
-        message: `Only ${availableQuantity} unit(s) available for reservation`,
-      });
-    }
-
     // Check if user already has a reservation for this item
     let reservation = await Reservation.findOne({
       item: itemId,
       reserver: reserverId,
     });
 
-    if (reservation) {
-      // Update existing reservation
-      if (reservation.status === 'cancelled') {
-        reservation.status = 'reserved';
-        reservation.quantity = quantity;
-      } else {
-        // Check if updating quantity would exceed available
-        const otherReservations = totalReserved - reservation.quantity;
-        if (otherReservations + quantity > item.quantity) {
-          return res.status(400).json({
-            success: false,
-            message: `Only ${
-              item.quantity - otherReservations
-            } unit(s) available for reservation`,
-          });
-        }
-        reservation.quantity = quantity;
-      }
-      await reservation.save();
+    // Determine action: if action is provided, use it. Otherwise, toggle based on current status.
+    let shouldReserve;
+    if (action) {
+      shouldReserve = action === 'reserve';
     } else {
+      // Toggle: if reservation exists and is active, cancel. Otherwise, reserve.
+      shouldReserve = !(reservation && reservation.status === 'reserved');
+    }
+
+    // Cancel reservation
+    if (!shouldReserve) {
+      if (!reservation || reservation.status === 'cancelled') {
+        return res.status(400).json({
+          success: false,
+          message: 'No active reservation found to cancel',
+        });
+      }
+
+      reservation.status = 'cancelled';
+      await reservation.save();
+
+      return res.status(200).json({
+        success: true,
+        message: 'Reservation cancelled successfully',
+        data: {
+          reservation: {
+            id: reservation._id,
+            item: itemId,
+            quantity: reservation.quantity,
+            status: reservation.status,
+          },
+          isReserved: false,
+        },
+      });
+    }
+
+    // Reserve: Create new reservation or reactivate cancelled one
+    // Calculate total reserved quantity (excluding current user's cancelled reservation)
+    const existingReservations = await Reservation.find({
+      item: itemId,
+      status: 'reserved',
+    });
+
+    const totalReserved = existingReservations.reduce(
+      (sum, res) => {
+        // Exclude current user's reservation if we're updating it
+        if (reservation && res.reserver.toString() === reserverId && res._id.toString() === reservation._id.toString()) {
+          return sum;
+        }
+        return sum + res.quantity;
+      },
+      0
+    );
+
+    // Check if there's enough quantity available (only for reserve action)
+    if (shouldReserve) {
+      const availableQuantity = item.quantity - totalReserved;
+
+      if (quantity > availableQuantity) {
+        return res.status(400).json({
+          success: false,
+          message: `Only ${availableQuantity} unit(s) available for reservation`,
+        });
+      }
+    }
+
+    if (reservation && reservation.status === 'cancelled') {
+      // Reactivate cancelled reservation
+      reservation.status = 'reserved';
+      reservation.quantity = quantity;
+      await reservation.save();
+    } else if (!reservation) {
       // Create new reservation
       reservation = await Reservation.create({
         item: itemId,
         reserver: reserverId,
         quantity,
       });
+    } else {
+      // Update existing reservation quantity
+      reservation.quantity = quantity;
+      await reservation.save();
     }
 
     // Create notification for the item owner (without revealing who reserved it)
@@ -122,12 +167,16 @@ exports.reserveItem = async (req, res) => {
       isRead: false,
     });
 
-    emitToUser(item.wishlist.owner._id.toString(), 'item_reserved', {
-      notification: await notification.populate('relatedUser', 'fullName username profileImage'),
-      unreadCount,
-    });
+    // Emit socket event if io is available
+    if (req.app.get('io')) {
+      const populatedNotification = await notification.populate('relatedUser', 'fullName username profileImage');
+      req.app.get('io').to(item.wishlist.owner._id.toString()).emit('item_reserved', {
+        notification: populatedNotification,
+        unreadCount,
+      });
+    }
 
-    return res.status(201).json({
+    return res.status(200).json({
       success: true,
       message: 'Item reserved successfully',
       data: {
@@ -137,13 +186,14 @@ exports.reserveItem = async (req, res) => {
           quantity: reservation.quantity,
           status: reservation.status,
         },
+        isReserved: true,
       },
     });
   } catch (error) {
-    console.error('Reserve item error:', error);
+    console.error('Toggle reservation error:', error);
     return res.status(500).json({
       success: false,
-      message: 'Failed to reserve item',
+      message: 'Failed to toggle reservation',
       error: error.message,
     });
   }

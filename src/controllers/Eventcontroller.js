@@ -572,6 +572,9 @@ exports.getEventById = async (req, res) => {
     const userInvitation = await EventInvitation.findOne({ event: id, invitee: req.user.id });
     const isInvited = !!userInvitation;
 
+    // Extract myInvitationStatus for the current user
+    const myInvitationStatus = userInvitation ? (userInvitation.status || 'pending') : 'not_invited';
+
     if (event.privacy === 'private' && !isCreator && !isInvited) {
       return res.status(403).json({
         success: false,
@@ -624,11 +627,35 @@ exports.getEventById = async (req, res) => {
       };
     });
 
+    // Get attendees (accepted/maybe) for social proof (excluding current user)
+    const acceptedAttendees = await EventInvitation.find({
+      event: id,
+      status: { $in: ['accepted', 'maybe'] },
+      invitee: { $ne: req.user.id } // Exclude current user
+    })
+      .populate('invitee', 'fullName username profileImage')
+      .sort({ updatedAt: -1 }) // Most recent responses first
+      .limit(10); // Top 10 for social proof
+
+    // Compute status dynamically based on event date vs current time
+    const eventDate = new Date(event.date);
+    const now = new Date();
+    const computedStatus = eventDate < now ? 'past' : 'upcoming';
+
     res.status(200).json({
       success: true,
       data: {
         ...event.toObject(),
-        invited_friends: transformedInvitedFriends
+        isCreator, // ✅ Boolean indicating if current user is the creator
+        myInvitationStatus, // ✅ Current user's invitation status ('pending', 'accepted', 'declined', 'maybe', or 'not_invited')
+        status: computedStatus, // ✅ Dynamically computed status ('past' or 'upcoming')
+        invited_friends: transformedInvitedFriends,
+        attendees: acceptedAttendees.map(inv => ({
+          _id: inv.invitee._id,
+          fullName: inv.invitee.fullName,
+          username: inv.invitee.username,
+          profileImage: inv.invitee.profileImage
+        })) // ✅ Accepted/maybe attendees for social proof
       },
       stats
     });

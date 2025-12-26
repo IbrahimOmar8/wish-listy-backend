@@ -230,6 +230,41 @@ exports.updateItem = async (req, res) => {
   }
 };
 
+// @desc    Get all items purchased/reserved by the current user
+// @route   GET /api/items/reserved
+// @access  Private
+exports.getMyReservedItems = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    // Find items purchased by current user
+    const items = await Item.find({
+      purchasedBy: userId,
+      isPurchased: true
+    })
+      .populate({
+        path: 'wishlist',
+        select: '_id name description',
+        populate: {
+          path: 'owner',
+          select: '_id fullName username profileImage'
+        }
+      })
+      .sort({ purchasedAt: -1, createdAt: -1 }); // Recently purchased first
+
+    res.status(200).json({
+      success: true,
+      data: items
+    });
+  } catch (error) {
+    console.error('Get My Reserved Items Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get reserved items'
+    });
+  }
+};
+
 exports.markItemAsPurchased = async (req, res) => {
   try {
     const { id } = req.params;

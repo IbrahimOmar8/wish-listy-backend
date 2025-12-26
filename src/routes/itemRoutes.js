@@ -13,6 +13,9 @@ router.get('/:id', itemController.getItemById);
 // Get Items by Wishlist ID
 router.get('/wishlist/:wishlistId', itemController.getItemsByWishlist);
 
+// Get all items reserved/purchased by current user (must come before /:id to avoid conflict)
+router.get('/reserved', itemController.getMyReservedItems);
+
 // Update Item
 router.put('/:id', itemController.updateItem);
 

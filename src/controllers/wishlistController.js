@@ -137,11 +137,15 @@ exports.getWishlistById = async (req, res) => {
         itemStatus = 'available';
       }
 
+      // Calculate isReserved: true if item is reserved by someone else (not by me)
+      const isReserved = !isOwner && resInfo.totalReserved > 0 && !resInfo.reservedByMe;
+
       return {
         ...itemObj,
         itemStatus,
         availableQuantity: isOwner ? item.quantity : item.quantity - resInfo.totalReserved,
         isReservedByMe: resInfo.reservedByMe,
+        isReserved, // true if reserved by another friend (not by me)
         // Don't show reservation details to owner (maintain surprise)
         ...(isOwner ? {} : {
           totalReserved: resInfo.totalReserved,

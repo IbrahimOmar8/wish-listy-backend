@@ -10,11 +10,8 @@ const {
 // All routes require authentication
 router.use(protect);
 
-// Reserve an item
-router.post('/items/:itemId/reserve', reserveItem);
-
-// Cancel a reservation
-router.delete('/items/:itemId/reserve', cancelReservation);
+// Toggle reservation (Reserve/Unreserve) - PUT method
+router.put('/items/:itemId/reserve', reserveItem);
 
 // Get my reservations
 router.get('/reservations', getMyReservations);

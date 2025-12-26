@@ -12,6 +12,7 @@ const userRoutes = require('./routes/userRoutes');
 const friendRoutes = require('./routes/friendRoutes');
 const notificationRoutes = require('./routes/notificationRoutes');
 const reservationRoutes = require('./routes/reservationRoutes');
+const dashboardRoutes = require('./routes/dashboardRoutes');
 
 const app = express();
 
@@ -75,7 +76,8 @@ app.get('/', (req, res) => {
       users: '/api/users',
       friends: '/api/friends',
       notifications: '/api/notifications',
-      reservations: '/api/reservations'
+      reservations: '/api/reservations',
+      dashboard: '/api/dashboard'
     }
   });
 });
@@ -88,6 +90,7 @@ app.use('/api/users', userRoutes);
 app.use('/api/friends', friendRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api', reservationRoutes);
+app.use('/api/dashboard', dashboardRoutes);
 
 // Error Handler
 app.use(errorHandler);
