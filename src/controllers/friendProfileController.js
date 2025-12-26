@@ -477,8 +477,8 @@ exports.getEventWishlists = async (req, res) => {
       .populate({
         path: 'items',
         populate: {
-          path: 'purchasedBy',
-          select: 'fullName username',
+          path: 'reservedBy',
+          select: 'fullName username profileImage',
         },
       })
       .populate('owner', 'fullName username profileImage');
@@ -515,8 +515,12 @@ exports.getEventWishlists = async (req, res) => {
       };
 
       let itemStatus;
-      if (item.isPurchased) {
+      // Check if item is received (owner marked as received)
+      if (item.isReceived) {
         itemStatus = 'gifted';
+      } else if (item.reservedBy) {
+        // Item is reserved/purchased (reservedBy is not null)
+        itemStatus = isWishlistOwner ? 'available' : 'reserved';
       } else if (resInfo.totalReserved >= item.quantity) {
         itemStatus = isWishlistOwner ? 'available' : 'reserved';
       } else {

@@ -40,7 +40,6 @@ exports.getMyWishlists = async (req, res) => {
     const wishlists = await Wishlist.find({ owner: req.user.id })
       .populate({
         path: 'items',
-        match: { isPurchased: false }, // Optional: show only unpurchased items
         options: { sort: { priority: -1, createdAt: -1 } } // Sort by priority and date
       })
       .populate('owner', 'fullName username profileImage');
@@ -67,8 +66,8 @@ exports.getWishlistById = async (req, res) => {
       .populate({
         path: 'items',
         populate: {
-          path: 'purchasedBy',
-          select: 'fullName username'
+          path: 'reservedBy',
+          select: 'fullName username profileImage'
         }
       })
       .populate('owner', 'fullName username profileImage')
@@ -83,54 +82,29 @@ exports.getWishlistById = async (req, res) => {
 
     const isOwner = wishlist.owner._id.toString() === viewerId;
 
-    // Get all reservations for items in this wishlist
-    const itemIds = wishlist.items.map(item => item._id);
-    const reservations = await Reservation.find({
-      item: { $in: itemIds },
-      status: 'reserved'
-    });
-
-    // Create a map of item reservations
-    const reservationMap = {};
-    reservations.forEach(res => {
-      const itemId = res.item.toString();
-      if (!reservationMap[itemId]) {
-        reservationMap[itemId] = {
-          totalReserved: 0,
-          reservedByMe: false
-        };
-      }
-      reservationMap[itemId].totalReserved += res.quantity;
-      if (res.reserver.toString() === viewerId) {
-        reservationMap[itemId].reservedByMe = true;
-      }
-    });
+    // Note: We now use Item.reservedBy field directly instead of Reservation collection
+    // The Reservation collection logic is kept as fallback for backward compatibility
 
     // Add item status based on viewer perspective
     const itemsWithStatus = wishlist.items.map(item => {
       const itemObj = item.toObject();
-      const resInfo = reservationMap[item._id.toString()] || { totalReserved: 0, reservedByMe: false };
+      
+      // Check if current user reserved this item (using reservedBy field)
+      const isReservedByMe = itemObj.reservedBy && itemObj.reservedBy._id.toString() === viewerId;
 
       let itemStatus;
 
-      if (item.isPurchased) {
-        // Item marked as gifted by owner
-        itemStatus = 'gifted';
-      } else if (resInfo.totalReserved >= item.quantity) {
-        // Fully reserved
+      // Check if item is received (owner marked as received)
+      if (item.isReceived) {
+        itemStatus = 'gifted'; // Received by owner
+      } else if (item.reservedBy) {
+        // Item is reserved/purchased (reservedBy is not null)
         if (isOwner) {
           // Owner sees it as available to maintain surprise
           itemStatus = 'available';
         } else {
           // Friends see it as reserved
           itemStatus = 'reserved';
-        }
-      } else if (resInfo.totalReserved > 0) {
-        // Partially reserved
-        if (isOwner) {
-          itemStatus = 'available'; // Maintain surprise for owner
-        } else {
-          itemStatus = 'available'; // Still available for more reservations
         }
       } else {
         // Not reserved at all
@@ -157,8 +131,9 @@ exports.getWishlistById = async (req, res) => {
     // Additional statistics
     const stats = {
       totalItems: wishlist.items.length,
-      purchasedItems: wishlist.items.filter(item => item.isPurchased).length,
-      pendingItems: wishlist.items.filter(item => !item.isPurchased).length
+      receivedItems: wishlist.items.filter(item => item.isReceived).length,
+      reservedItems: wishlist.items.filter(item => item.reservedBy).length,
+      pendingItems: wishlist.items.filter(item => !item.reservedBy && !item.isReceived).length
     };
 
     res.status(200).json({

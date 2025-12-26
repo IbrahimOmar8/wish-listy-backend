@@ -73,7 +73,8 @@ exports.addItem = async (req, res) => {
         notes: populatedItem.notes,
         priority: populatedItem.priority,
         image: populatedItem.image,
-        isPurchased: populatedItem.isPurchased,
+        reservedBy: populatedItem.reservedBy || null,
+        isReceived: populatedItem.isReceived || false,
         wishlist: populatedItem.wishlist,
         createdAt: populatedItem.createdAt,
         updatedAt: populatedItem.updatedAt
@@ -137,13 +138,48 @@ exports.deleteItem = async (req, res) => {
   }
 };
 
+// @desc    Get all items reserved by the current user
+// @route   GET /api/items/reserved
+// @access  Private
+exports.getMyReservedItems = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    // Find items reserved by current user that haven't been received yet
+    const items = await Item.find({
+      reservedBy: userId,
+      isReceived: false
+    })
+      .populate({
+        path: 'wishlist',
+        select: '_id name description',
+        populate: {
+          path: 'owner',
+          select: '_id fullName username profileImage'
+        }
+      })
+      .sort({ updatedAt: -1 }); // Recently reserved first (updatedAt changes when reserved)
+
+    res.status(200).json({
+      success: true,
+      data: items
+    });
+  } catch (error) {
+    console.error('Get My Reserved Items Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get reserved items'
+    });
+  }
+};
+
 // Other functions remain the same with minor improvements
 exports.getItemsByWishlist = async (req, res) => {
   try {
     const { wishlistId } = req.params;
 
     const items = await Item.find({ wishlist: wishlistId })
-      .populate('purchasedBy', 'fullName username'); // Add populate for purchaser info
+      .populate('reservedBy', 'fullName username profileImage');
 
     res.status(200).json({
       success: true,
@@ -157,12 +193,26 @@ exports.getItemsByWishlist = async (req, res) => {
     });
   }
 };
-// Get item by ID with purchaser info
+// @desc    Get item by ID with Owner vs Guest logic
+// @route   GET /api/items/:id
+// @access  Private
 exports.getItemById = async (req, res) => {
   try {
     const { id } = req.params;
+    const viewerId = req.user.id;
 
-    const item = await Item.findById(id) ;
+    // Find item with wishlist and reservedBy populated
+    const item = await Item.findById(id)
+      .populate('reservedBy', 'fullName username profileImage')
+      .populate({
+        path: 'wishlist',
+        select: '_id name description owner privacy',
+        populate: {
+          path: 'owner',
+          select: '_id fullName username profileImage'
+        }
+      });
+    
     if (!item) {
       return res.status(404).json({
         success: false,
@@ -170,14 +220,41 @@ exports.getItemById = async (req, res) => {
       });
     }
 
-    // Populate purchaser info if item is purchased
-    if (item.isPurchased) {
-      await item.populate('purchasedBy', 'fullName username');
+    // Check if viewer is the owner of the wishlist
+    const isOwner = item.wishlist.owner._id.toString() === viewerId;
+
+    // Convert to object for manipulation
+    const itemObj = item.toObject();
+
+    // Owner view: Hide reservedBy (spoiler protection), show isReceived
+    if (isOwner) {
+      return res.status(200).json({
+        success: true,
+        item: {
+          ...itemObj,
+          reservedBy: null, // Hide from owner
+          isReceived: itemObj.isReceived || false,
+          wishlist: itemObj.wishlist
+        }
+      });
     }
+
+    // Guest view: Show reservedBy populated (if exists), show isReceived
+    const responseItem = {
+      ...itemObj,
+      reservedBy: itemObj.reservedBy ? {
+        _id: itemObj.reservedBy._id,
+        fullName: itemObj.reservedBy.fullName,
+        username: itemObj.reservedBy.username,
+        profileImage: itemObj.reservedBy.profileImage
+      } : null,
+      isReceived: itemObj.isReceived || false,
+      wishlist: itemObj.wishlist
+    };
 
     res.status(200).json({
       success: true,
-      item
+      item: responseItem
     });
   } catch (error) {
     console.error('Get Item by ID Error:', error);
@@ -230,6 +307,7 @@ exports.updateItem = async (req, res) => {
   }
 };
 
+<<<<<<< HEAD
 // @desc    Get all items purchased/reserved by the current user
 // @route   GET /api/items/reserved
 // @access  Private
@@ -296,6 +374,135 @@ exports.markItemAsPurchased = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to mark item as purchased'
+    });
+  }
+};
+
+// @desc    Toggle item reservation (Reserve/Cancel)
+// @route   PUT /api/items/:id/reserve
+// @access  Private (Guest only - not owner)
+exports.toggleItemReservation = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+
+    // Find item with wishlist populated
+    const item = await Item.findById(id)
+      .populate('wishlist', 'owner')
+      .populate('reservedBy', 'fullName username profileImage');
+
+    if (!item) {
+      return res.status(404).json({
+        success: false,
+        message: 'Item not found'
+      });
+    }
+
+    // Constraint: Cannot reserve if already received
+    if (item.isReceived) {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot reserve an item that has been received'
+      });
+    }
+
+    // Verify user is not the owner
+    if (item.wishlist.owner.toString() === userId) {
+      return res.status(403).json({
+        success: false,
+        message: 'You cannot reserve items from your own wishlist'
+      });
+    }
+
+    // Toggle logic
+    const currentReservedBy = item.reservedBy ? item.reservedBy._id.toString() : null;
+
+    if (!currentReservedBy) {
+      // Reserve it
+      item.reservedBy = userId;
+    } else if (currentReservedBy === userId) {
+      // Cancel reservation
+      item.reservedBy = null;
+    } else {
+      // Already reserved by someone else
+      return res.status(400).json({
+        success: false,
+        message: 'This item is already reserved by someone else'
+      });
+    }
+
+    await item.save();
+
+    // Populate reservedBy for response
+    const updatedItem = await Item.findById(id)
+      .populate('reservedBy', 'fullName username profileImage');
+
+    // Determine message based on whether item was reserved or cancelled
+    const isNowReserved = !!updatedItem.reservedBy;
+
+    res.status(200).json({
+      success: true,
+      message: isNowReserved ? 'Item reserved successfully' : 'Reservation cancelled successfully',
+      item: updatedItem
+    });
+  } catch (error) {
+    console.error('Toggle Item Reservation Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to toggle item reservation'
+    });
+  }
+};
+
+// @desc    Update item status - isReceived (Owner only)
+// @route   PUT /api/items/:id/status
+// @access  Private (Owner only)
+exports.updateItemStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { isReceived } = req.body;
+    const userId = req.user.id;
+
+    // Find item with wishlist populated
+    const item = await Item.findById(id)
+      .populate('wishlist', 'owner')
+      .populate('reservedBy', 'fullName username profileImage');
+
+    if (!item) {
+      return res.status(404).json({
+        success: false,
+        message: 'Item not found'
+      });
+    }
+
+    // Verify user is the owner - REJECT if Guest
+    if (item.wishlist.owner.toString() !== userId) {
+      return res.status(403).json({
+        success: false,
+        message: 'Only the wishlist owner can mark items as received'
+      });
+    }
+
+    // Update isReceived (do NOT clear reservedBy - keep record of who bought it)
+    item.isReceived = isReceived !== undefined ? isReceived : !item.isReceived;
+    await item.save();
+
+    // Populate for response (hide reservedBy for owner)
+    const updatedItem = await Item.findById(id);
+    
+    const itemObj = updatedItem.toObject();
+    itemObj.reservedBy = null; // Hide from owner (spoiler protection)
+
+    res.status(200).json({
+      success: true,
+      message: `Item marked as ${item.isReceived ? 'received' : 'not received'}`,
+      item: itemObj
+    });
+  } catch (error) {
+    console.error('Update Item Status Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update item status'
     });
   }
 };

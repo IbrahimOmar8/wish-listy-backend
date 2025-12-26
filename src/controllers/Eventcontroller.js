@@ -1050,7 +1050,7 @@ exports.respondToInvitation = async (req, res) => {
     const { response, status } = req.body;
     const responseStatus = response || status;
 
-    const validResponses = ['accepted', 'declined', 'maybe'];
+    const validResponses = ['accepted', 'declined', 'maybe', 'pending'];
     if (!responseStatus || !validResponses.includes(responseStatus)) {
       return res.status(400).json({
         success: false,
@@ -1108,12 +1108,14 @@ exports.respondToInvitation = async (req, res) => {
       });
     }
 
-    // Create notification for the event creator (only if status changed)
-    if (previousStatus !== responseStatus && event.creator.toString() !== req.user.id) {
+    // Create notification for the event creator (only if status changed and not pending)
+    // Don't send notification when status is reset to 'pending' (user is undoing their response)
+    if (previousStatus !== responseStatus && event.creator.toString() !== req.user.id && responseStatus !== 'pending') {
       const statusMessages = {
         'accepted': 'accepted',
         'declined': 'declined',
-        'maybe': 'might attend'
+        'maybe': 'might attend',
+        'pending': 'reset their response to pending'
       };
 
       // Set notification type based on response status
@@ -1144,8 +1146,13 @@ exports.respondToInvitation = async (req, res) => {
       // Calculate creator's current unreadCount with badge dismissal logic
       const unreadCount = await getUnreadCountWithBadge(event.creator);
 
-      // Emit socket event if io is available
-      if (req.app.get('io')) {
+      // Emit socket event if io is available (only if not pending)
+      if (req.app.get('io') && responseStatus !== 'pending') {
+        const statusMessages = {
+          'accepted': 'accepted',
+          'declined': 'declined',
+          'maybe': 'might attend'
+        };
         req.app.get('io').to(event.creator.toString()).emit('event_invitation_response', {
           eventId: event._id,
           eventName: event.name,
