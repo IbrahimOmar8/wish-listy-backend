@@ -101,14 +101,37 @@ exports.addItem = async (req, res) => {
 exports.deleteItem = async (req, res) => {
   try {
     const { id } = req.params;
+    const Reservation = require('../models/Reservation');
 
-    const item = await Item.findById(id);
+    // Fetch item with wishlist populated to check ownership
+    const item = await Item.findById(id).populate({
+      path: 'wishlist',
+      select: 'owner'
+    });
     
     if (!item) {
       return res.status(404).json({
         success: false,
         message: 'Item not found'
       });
+    }
+
+    // Check if user is the owner
+    const isOwner = item.wishlist && item.wishlist.owner.toString() === req.user.id;
+
+    // If owner, check if item has active reservations
+    if (isOwner) {
+      const activeReservations = await Reservation.find({
+        item: id,
+        status: 'reserved'
+      });
+
+      if (activeReservations.length > 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Cannot delete an item that is currently reserved by a friend.'
+        });
+      }
     }
 
     // Remove the Item from the Wishlist before deletion
@@ -200,10 +223,11 @@ exports.getItemById = async (req, res) => {
   try {
     const { id } = req.params;
     const viewerId = req.user.id;
+    const Reservation = require('../models/Reservation');
 
-    // Find item with wishlist and reservedBy populated
+    // Find item with wishlist and purchasedBy populated
     const item = await Item.findById(id)
-      .populate('reservedBy', 'fullName username profileImage')
+      .populate('purchasedBy', 'fullName username profileImage')
       .populate({
         path: 'wishlist',
         select: '_id name description owner privacy',
@@ -223,32 +247,61 @@ exports.getItemById = async (req, res) => {
     // Check if viewer is the owner of the wishlist
     const isOwner = item.wishlist.owner._id.toString() === viewerId;
 
+    // Get reservation info from Reservation collection
+    const reservation = await Reservation.findOne({
+      item: id,
+      reserver: viewerId,
+      status: 'reserved'
+    });
+
+    // Get all active reservations for this item (for quantity calculation)
+    const allReservations = await Reservation.find({
+      item: id,
+      status: 'reserved'
+    });
+
+    const totalReserved = allReservations.reduce((sum, res) => sum + res.quantity, 0);
+    const isReservedByMe = !!reservation;
+    const availableQuantity = Math.max(0, item.quantity - totalReserved);
+
     // Convert to object for manipulation
     const itemObj = item.toObject();
 
-    // Owner view: Hide reservedBy (spoiler protection), show isReceived
+    // Owner view: Show reservation status (teaser mode) but not who reserved it
     if (isOwner) {
+      // Calculate itemStatus
+      let itemStatus;
+      if (itemObj.isPurchased) {
+        itemStatus = 'gifted';
+      } else if (totalReserved > 0) {
+        itemStatus = 'reserved';
+      } else {
+        itemStatus = 'available';
+      }
+
       return res.status(200).json({
         success: true,
         item: {
           ...itemObj,
-          reservedBy: null, // Hide from owner
-          isReceived: itemObj.isReceived || false,
+          availableQuantity: Math.max(0, item.quantity - totalReserved), // Owner sees actual available quantity
+          isReservedByMe: false, // Owner always sees false
+          isReserved: totalReserved > 0, // Owner sees if item is reserved
+          totalReserved, // Owner sees count but not who reserved
+          itemStatus, // Owner sees status
           wishlist: itemObj.wishlist
+          // Note: No reserver details (names, IDs) are included for owner privacy
         }
       });
     }
 
-    // Guest view: Show reservedBy populated (if exists), show isReceived
+    // Guest view: Show reservation info and purchase info
     const responseItem = {
       ...itemObj,
-      reservedBy: itemObj.reservedBy ? {
-        _id: itemObj.reservedBy._id,
-        fullName: itemObj.reservedBy.fullName,
-        username: itemObj.reservedBy.username,
-        profileImage: itemObj.reservedBy.profileImage
-      } : null,
-      isReceived: itemObj.isReceived || false,
+      availableQuantity,
+      isReservedByMe,
+      isReserved: totalReserved > 0 && !isReservedByMe, // Reserved by someone else
+      totalReserved,
+      remainingQuantity: availableQuantity,
       wishlist: itemObj.wishlist
     };
 
@@ -260,7 +313,8 @@ exports.getItemById = async (req, res) => {
     console.error('Get Item by ID Error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to get item'
+      message: 'Failed to get item',
+      error: error.message
     });
   }
 }   
@@ -270,6 +324,7 @@ exports.updateItem = async (req, res) => {
   try {
     const { id } = req.params;
     const updates = req.body;
+    const Reservation = require('../models/Reservation');
 
     // Fields that can be updated
     const allowedFields = ['name', 'description', 'url', 'storeName', 'storeLocation', 'notes', 'priority', 'image'];
@@ -281,11 +336,11 @@ exports.updateItem = async (req, res) => {
       }
     });
 
-    const item = await Item.findByIdAndUpdate(
-      id, 
-      filteredUpdates, 
-      { new: true, runValidators: true }
-    );
+    // First, fetch item with wishlist to check ownership
+    const item = await Item.findById(id).populate({
+      path: 'wishlist',
+      select: 'owner'
+    });
 
     if (!item) {
       return res.status(404).json({
@@ -294,9 +349,34 @@ exports.updateItem = async (req, res) => {
       });
     }
 
+    // Check if user is the owner
+    const isOwner = item.wishlist && item.wishlist.owner.toString() === req.user.id;
+
+    // If owner, check if item has active reservations
+    if (isOwner) {
+      const activeReservations = await Reservation.find({
+        item: id,
+        status: 'reserved'
+      });
+
+      if (activeReservations.length > 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Cannot edit an item that is currently reserved by a friend.'
+        });
+      }
+    }
+
+    // Proceed with update
+    const updatedItem = await Item.findByIdAndUpdate(
+      id, 
+      filteredUpdates, 
+      { new: true, runValidators: true }
+    );
+
     res.status(200).json({
       success: true,
-      item
+      item: updatedItem
     });
   } catch (error) {
     console.error('Update Item Error:', error);

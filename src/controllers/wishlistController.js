@@ -135,33 +135,39 @@ exports.getWishlistById = async (req, res) => {
         itemStatus = 'gifted'; // Purchased/received
       } else if (resInfo.totalReserved > 0) {
         // Item has active reservations
-        if (isOwner) {
-          // Owner sees it as available to maintain surprise
-          itemStatus = 'available';
-        } else {
-          // Friends see it as reserved
-          itemStatus = 'reserved';
-        }
+        itemStatus = 'reserved'; // Both owner and guests see 'reserved' if totalReserved > 0
       } else {
         // Not reserved at all
         itemStatus = 'available';
       }
 
-      // Calculate isReserved: true if item is reserved by someone else (not by me)
-      const isReserved = !isOwner && resInfo.totalReserved > 0 && !resInfo.reservedByMe;
+      // Calculate isReserved: true if item has any reservations
+      // For owner: shows true if reserved (teaser mode - knows it's reserved but not who)
+      // For guest: shows true if reserved by someone else (not by me)
+      const isReserved = isOwner 
+        ? resInfo.totalReserved > 0  // Owner sees reservation status
+        : resInfo.totalReserved > 0 && !resInfo.reservedByMe;  // Guest sees if reserved by others
 
-      return {
+      // Build response based on viewer type
+      const baseItem = {
         ...itemObj,
         itemStatus,
-        availableQuantity: isOwner ? item.quantity : Math.max(0, item.quantity - resInfo.totalReserved),
-        isReservedByMe: resInfo.reservedByMe,
-        isReserved, // true if reserved by another friend (not by me)
-        // Don't show reservation details to owner (maintain surprise)
-        ...(isOwner ? {} : {
-          totalReserved: resInfo.totalReserved,
-          remainingQuantity: Math.max(0, item.quantity - resInfo.totalReserved)
-        })
+        availableQuantity: Math.max(0, item.quantity - resInfo.totalReserved), // Owner now sees actual available quantity
+        isReservedByMe: isOwner ? false : resInfo.reservedByMe, // Owner always sees false
+        isReserved,
       };
+
+      // Add reservation details only for guests (not for owner - privacy protection)
+      if (!isOwner) {
+        baseItem.totalReserved = resInfo.totalReserved;
+        baseItem.remainingQuantity = Math.max(0, item.quantity - resInfo.totalReserved);
+        // Note: reservers array is not included in response for privacy
+      } else {
+        // Owner sees totalReserved count but NOT reserver details
+        baseItem.totalReserved = resInfo.totalReserved;
+      }
+
+      return baseItem;
     });
 
     // Additional statistics
