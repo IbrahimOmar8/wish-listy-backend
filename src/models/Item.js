@@ -48,6 +48,10 @@ const itemSchema = new mongoose.Schema({
     type: Date,
     default: null
   },
+  isReceived: {
+    type: Boolean,
+    default: false
+  },
   wishlist: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Wishlist',

@@ -18,6 +18,9 @@ router.get('/reserved', itemController.getMyReservedItems);
 // Mark Item as Purchased
 router.put('/:id/purchase', itemController.markItemAsPurchased);
 
+// Update item status - isReceived (Owner only)
+router.put('/:id/status', itemController.updateItemStatus);
+
 // Get Item by ID
 router.get('/:id', itemController.getItemById);
 

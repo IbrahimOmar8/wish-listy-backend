@@ -1,5 +1,6 @@
 const Item = require('../models/Item');
 const Wishlist = require('../models/Wishlist');
+const mongoose = require('mongoose');
 
 exports.addItem = async (req, res) => {
   try {
@@ -201,18 +202,36 @@ exports.getItemsByWishlist = async (req, res) => {
   try {
     const { wishlistId } = req.params;
 
+    // Validate wishlistId - it should be a valid MongoDB ObjectId
+    if (!wishlistId || !mongoose.Types.ObjectId.isValid(wishlistId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid wishlist ID format'
+      });
+    }
+
+    // Check if wishlist exists
+    const wishlist = await Wishlist.findById(wishlistId);
+    if (!wishlist) {
+      return res.status(404).json({
+        success: false,
+        message: 'Wishlist not found'
+      });
+    }
+
     const items = await Item.find({ wishlist: wishlistId })
-      .populate('reservedBy', 'fullName username profileImage');
+      .populate('purchasedBy', 'fullName username profileImage');
 
     res.status(200).json({
       success: true,
       items
     });
   } catch (error) {
-    console.error('Get Items Error:', error);
+    console.error('Get Items By Wishlist Error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to get items'
+      message: 'Failed to get items',
+      error: error.message
     });
   }
 };
@@ -544,8 +563,14 @@ exports.updateItemStatus = async (req, res) => {
 
     // Find item with wishlist populated
     const item = await Item.findById(id)
-      .populate('wishlist', 'owner')
-      .populate('reservedBy', 'fullName username profileImage');
+      .populate({
+        path: 'wishlist',
+        select: 'owner',
+        populate: {
+          path: 'owner',
+          select: '_id fullName username'
+        }
+      });
 
     if (!item) {
       return res.status(404).json({
@@ -554,23 +579,39 @@ exports.updateItemStatus = async (req, res) => {
       });
     }
 
+    // Verify item has a wishlist
+    if (!item.wishlist || !item.wishlist.owner) {
+      return res.status(400).json({
+        success: false,
+        message: 'Item does not have a valid wishlist'
+      });
+    }
+
     // Verify user is the owner - REJECT if Guest
-    if (item.wishlist.owner.toString() !== userId) {
+    if (item.wishlist.owner._id.toString() !== userId) {
       return res.status(403).json({
         success: false,
         message: 'Only the wishlist owner can mark items as received'
       });
     }
 
-    // Update isReceived (do NOT clear reservedBy - keep record of who bought it)
+    // Update isReceived
     item.isReceived = isReceived !== undefined ? isReceived : !item.isReceived;
     await item.save();
 
-    // Populate for response (hide reservedBy for owner)
-    const updatedItem = await Item.findById(id);
+    // Fetch updated item for response
+    const updatedItem = await Item.findById(id)
+      .populate('purchasedBy', 'fullName username profileImage')
+      .populate({
+        path: 'wishlist',
+        select: '_id name description owner privacy',
+        populate: {
+          path: 'owner',
+          select: '_id fullName username profileImage'
+        }
+      });
     
     const itemObj = updatedItem.toObject();
-    itemObj.reservedBy = null; // Hide from owner (spoiler protection)
 
     res.status(200).json({
       success: true,
