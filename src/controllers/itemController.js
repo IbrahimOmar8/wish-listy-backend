@@ -5,7 +5,6 @@ const mongoose = require('mongoose');
 exports.addItem = async (req, res) => {
   try {
     const { name, description, wishlistId, priority, url, storeName, storeLocation, notes } = req.body;
-
     // Validation
     if (!name || !wishlistId) {
       return res.status(400).json({
