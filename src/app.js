@@ -13,6 +13,7 @@ const friendRoutes = require('./routes/friendRoutes');
 const notificationRoutes = require('./routes/notificationRoutes');
 const reservationRoutes = require('./routes/reservationRoutes');
 const dashboardRoutes = require('./routes/dashboardRoutes');
+const activityRoutes = require('./routes/activityRoutes');
 
 const app = express();
 
@@ -77,7 +78,8 @@ app.get('/', (req, res) => {
       friends: '/api/friends',
       notifications: '/api/notifications',
       reservations: '/api/reservations',
-      dashboard: '/api/dashboard'
+      dashboard: '/api/dashboard',
+      activities: '/api/activities'
     }
   });
 });
@@ -91,6 +93,7 @@ app.use('/api/friends', friendRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api', reservationRoutes);
 app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/activities', activityRoutes);
 
 // Error Handler
 app.use(errorHandler);

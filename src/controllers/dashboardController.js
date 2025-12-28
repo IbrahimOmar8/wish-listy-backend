@@ -21,7 +21,6 @@ exports.getHomeData = async (req, res) => {
       wishlists,
       totalWishlistsCount,
       eventInvitations,
-      friendWishlistIds,
       unreadNotificationsCount
     ] = await Promise.all([
       // 1. Get top 5 wishlists (sorted by updatedAt desc)
@@ -48,34 +47,12 @@ exports.getHomeData = async (req, res) => {
           select: '_id name description date time type privacy location creator'
         }),
 
-      // 4. Get wishlist IDs owned by friends (for friend activity)
-      friendIds.length > 0
-        ? Wishlist.find({ owner: { $in: friendIds } }).distinct('_id')
-        : Promise.resolve([]),
-
-      // 5. Count unread notifications
+      // 4. Count unread notifications
       Notification.countDocuments({
         user: userId,
         isRead: false
       })
     ]);
-
-    // Get friend activity items (after getting friend wishlist IDs)
-    const friendItems = friendWishlistIds.length > 0
-      ? await Item.find({
-          wishlist: { $in: friendWishlistIds }
-        })
-          .populate({
-            path: 'wishlist',
-            select: 'owner',
-            populate: {
-              path: 'owner',
-              select: '_id fullName username profileImage'
-            }
-          })
-          .sort({ createdAt: -1 })
-          .limit(10)
-      : [];
 
     // Extract firstName from fullName
     const firstName = user?.fullName ? user.fullName.split(' ')[0] : 'User';
@@ -97,22 +74,41 @@ exports.getHomeData = async (req, res) => {
       }))
       .sort((a, b) => new Date(a.date) - new Date(b.date)); // Sort by date ascending (nearest first)
 
-    // Transform friend items to include owner info
-    const friendActivity = friendItems
-      .filter(item => item.wishlist && item.wishlist.owner) // Filter items with valid wishlist and owner
-      .map(item => ({
-        _id: item._id,
-        name: item.name,
-        description: item.description,
-        image: item.image,
-        url: item.url,
-        priority: item.priority,
-        createdAt: item.createdAt,
-        wishlist: {
-          _id: item.wishlist._id,
-          owner: item.wishlist.owner
-        }
+    // Get latest activity preview (optional - limit to 3 for dashboard preview)
+    let latestActivityPreview = [];
+    if (friendIds.length > 0) {
+      const activityTypes = [
+        'item_purchased',
+        'item_reserved',
+        'wishlist_shared',
+        'event_invitation_accepted'
+      ];
+
+      const previewNotifications = await Notification.find({
+        relatedUser: { $in: friendIds },
+        type: { $in: activityTypes }
+      })
+        .populate({
+          path: 'relatedUser',
+          select: '_id fullName username profileImage'
+        })
+        .sort({ createdAt: -1 })
+        .limit(3)
+        .lean();
+
+      latestActivityPreview = previewNotifications.map(notif => ({
+        _id: notif._id,
+        type: notif.type,
+        message: notif.message,
+        actor: {
+          _id: notif.relatedUser._id,
+          fullName: notif.relatedUser.fullName,
+          username: notif.relatedUser.username,
+          profileImage: notif.relatedUser.profileImage
+        },
+        createdAt: notif.createdAt
       }));
+    }
 
     // Construct response
     res.status(200).json({
@@ -136,7 +132,7 @@ exports.getHomeData = async (req, res) => {
           updatedAt: w.updatedAt
         })),
         upcomingOccasions,
-        friendActivity
+        latestActivityPreview
       }
     });
   } catch (error) {
