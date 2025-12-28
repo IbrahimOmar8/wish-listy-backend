@@ -1,0 +1,55 @@
+services:
+  # Main Backend API with Socket.IO
+  - type: web
+    name: wishlisty-backend
+    env: node
+    region: frankfurt # Closest to Middle East (or use oregon/singapore based on your users)
+    plan: free # Can upgrade to starter ($7/month) for no cold starts
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /
+
+    # Environment Variables
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+      - key: PORT
+        value: 4000
+
+      # MongoDB Connection (add this from Render Dashboard for security)
+      - key: MONGODB_URI
+        sync: false # You'll add this manually in Render Dashboard
+
+      # JWT Secret (auto-generate secure random string)
+      - key: JWT_SECRET
+        generateValue: true
+
+      - key: JWT_EXPIRE
+        value: 7d
+
+      # Optional: Twilio (if you use SMS OTP)
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+
+      - key: TWILIO_PHONE_NUMBER
+        sync: false
+
+      - key: OTP_EXPIRY_MINUTES
+        value: 10
+
+      # Optional: Cloudinary (if you use image uploads)
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+
+      - key: CLOUDINARY_API_KEY
+        sync: false
+
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+
+    # Auto-deploy from GitHub
+    autoDeploy: true
