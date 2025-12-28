@@ -1,7 +1,5 @@
-const Notification = require('../models/Notification');
 const User = require('../models/User');
 const Item = require('../models/Item');
-const Event = require('../models/Event');
 const Wishlist = require('../models/Wishlist');
 
 /**
@@ -42,129 +40,144 @@ exports.getFriendActivities = async (req, res) => {
       });
     }
 
-    // Query notifications where relatedUser (actor) is in friends list
-    // Filter by activity-related notification types and time constraint
-    const activityTypes = [
-      'item_purchased',
-      'item_reserved',
-      'wishlist_shared',
-      'event_invitation_accepted'
-    ];
+    // Get wishlist IDs owned by friends with owner info
+    const friendWishlists = await Wishlist.find({ owner: { $in: friendIds } })
+      .select('_id owner name')
+      .populate({
+        path: 'owner',
+        select: '_id fullName username profileImage'
+      })
+      .lean();
 
-    // Build query with time constraint
-    const baseQuery = {
-      relatedUser: { $in: friendIds },
-      type: { $in: activityTypes },
-      createdAt: { $gte: fifteenDaysAgo }
-    };
-
-    // Count total matching notifications for pagination (capped at MAX_TOTAL_RESULTS)
-    const totalItemsUncapped = await Notification.countDocuments(baseQuery);
-    const totalItems = Math.min(totalItemsUncapped, MAX_TOTAL_RESULTS);
-
-    // Fetch paginated notifications with time constraint and result cap
-    // Apply limit to query to respect MAX_TOTAL_RESULTS
-    const queryLimit = Math.min(limit, MAX_TOTAL_RESULTS - skip);
-    
-    // If skip exceeds MAX_TOTAL_RESULTS, return empty results
-    if (skip >= MAX_TOTAL_RESULTS || queryLimit <= 0) {
+    if (friendWishlists.length === 0) {
       return res.status(200).json({
         success: true,
         data: [],
         pagination: {
           currentPage: page,
-          totalPages: Math.ceil(totalItems / limit),
-          totalItems,
+          totalPages: 0,
+          totalItems: 0,
           hasNextPage: false,
           limit
         }
       });
     }
 
-    const notifications = await Notification.find(baseQuery)
-      .populate({
-        path: 'relatedUser',
-        select: '_id fullName username profileImage'
-      })
-      .sort({ createdAt: -1 }) // Sort descending by createdAt (newest first)
-      .skip(skip)
-      .limit(queryLimit)
+    const wishlistIds = friendWishlists.map(w => w._id);
+    const wishlistOwnerMap = new Map(
+      friendWishlists.map(w => [w._id.toString(), w.owner])
+    );
+    const wishlistNameMap = new Map(
+      friendWishlists.map(w => [w._id.toString(), w.name])
+    );
+
+    // Get items added by friends (created in last 15 days)
+    const addedItems = await Item.find({
+      wishlist: { $in: wishlistIds },
+      createdAt: { $gte: fifteenDaysAgo }
+    })
+      .select('_id name description image url wishlist createdAt')
+      .sort({ createdAt: -1 })
+      .limit(MAX_TOTAL_RESULTS)
       .lean();
 
-    // Enrich notifications with related entity details
-    const enrichedActivities = await Promise.all(
-      notifications.map(async (notification) => {
-        const activity = {
-          _id: notification._id,
-          type: notification.type,
-          title: notification.title,
-          message: notification.message,
+    // Get items marked as received by friends (updated in last 15 days)
+    const receivedItems = await Item.find({
+      wishlist: { $in: wishlistIds },
+      isReceived: true,
+      updatedAt: { $gte: fifteenDaysAgo }
+    })
+      .select('_id name description image url wishlist updatedAt')
+      .sort({ updatedAt: -1 })
+      .limit(MAX_TOTAL_RESULTS)
+      .lean();
+
+    // Combine and transform activities
+    const allActivities = [];
+
+    // Add "item_added" activities
+    for (const item of addedItems) {
+      const wishlistIdStr = item.wishlist.toString();
+      const owner = wishlistOwnerMap.get(wishlistIdStr);
+      const wishlistName = wishlistNameMap.get(wishlistIdStr);
+      
+      if (owner) {
+        allActivities.push({
+          _id: item._id,
+          type: 'wishlist_item_added',
           actor: {
-            _id: notification.relatedUser._id,
-            fullName: notification.relatedUser.fullName,
-            username: notification.relatedUser.username,
-            profileImage: notification.relatedUser.profileImage
+            _id: owner._id,
+            fullName: owner.fullName,
+            username: owner.username,
+            profileImage: owner.profileImage
           },
-          createdAt: notification.createdAt
-        };
-
-        // Populate related entity based on type and relatedId
-        if (notification.relatedId) {
-          if (notification.type === 'item_purchased' || notification.type === 'item_reserved') {
-            const item = await Item.findById(notification.relatedId)
-              .select('_id name description image url wishlist')
-              .populate({
-                path: 'wishlist',
-                select: '_id name owner',
-                populate: {
-                  path: 'owner',
-                  select: '_id fullName username profileImage'
-                }
-              })
-              .lean();
-
-            if (item) {
-              activity.target = {
-                type: 'item',
-                data: item
-              };
+          target: {
+            type: 'item',
+            itemName: item.name,
+            wishlistName: wishlistName,
+            data: {
+              _id: item._id,
+              name: item.name,
+              description: item.description,
+              image: item.image,
+              url: item.url,
+              wishlist: {
+                _id: wishlistIdStr,
+                name: wishlistName
+              }
             }
-          } else if (notification.type.includes('event')) {
-            const event = await Event.findById(notification.relatedId)
-              .select('_id name description date time type location creator')
-              .populate({
-                path: 'creator',
-                select: '_id fullName username profileImage'
-              })
-              .lean();
+          },
+          createdAt: item.createdAt
+        });
+      }
+    }
 
-            if (event) {
-              activity.target = {
-                type: 'event',
-                data: event
-              };
+    // Add "item_received" activities
+    for (const item of receivedItems) {
+      const wishlistIdStr = item.wishlist.toString();
+      const owner = wishlistOwnerMap.get(wishlistIdStr);
+      const wishlistName = wishlistNameMap.get(wishlistIdStr);
+      
+      if (owner) {
+        allActivities.push({
+          _id: item._id,
+          type: 'item_received',
+          actor: {
+            _id: owner._id,
+            fullName: owner.fullName,
+            username: owner.username,
+            profileImage: owner.profileImage
+          },
+          target: {
+            type: 'item',
+            itemName: item.name,
+            wishlistName: wishlistName,
+            data: {
+              _id: item._id,
+              name: item.name,
+              description: item.description,
+              image: item.image,
+              url: item.url,
+              wishlist: {
+                _id: wishlistIdStr,
+                name: wishlistName
+              }
             }
-          } else if (notification.type === 'wishlist_shared') {
-            const wishlist = await Wishlist.findById(notification.relatedId)
-              .select('_id name description privacy owner')
-              .populate({
-                path: 'owner',
-                select: '_id fullName username profileImage'
-              })
-              .lean();
+          },
+          createdAt: item.updatedAt
+        });
+      }
+    }
 
-            if (wishlist) {
-              activity.target = {
-                type: 'wishlist',
-                data: wishlist
-              };
-            }
-          }
-        }
+    // Sort by createdAt descending
+    allActivities.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
-        return activity;
-      })
-    );
+    // Apply total results cap
+    const cappedActivities = allActivities.slice(0, MAX_TOTAL_RESULTS);
+    const totalItems = cappedActivities.length;
+
+    // Apply pagination
+    const paginatedActivities = cappedActivities.slice(skip, skip + limit);
 
     // Calculate pagination metadata
     const totalPages = Math.ceil(totalItems / limit);
@@ -172,7 +185,7 @@ exports.getFriendActivities = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      data: enrichedActivities,
+      data: paginatedActivities,
       pagination: {
         currentPage: page,
         totalPages,

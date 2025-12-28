@@ -19,7 +19,9 @@ const notificationSchema = new mongoose.Schema({
       'event_invitation_maybe',
       'item_purchased',
       'item_reserved',
-      'wishlist_shared'
+      'wishlist_shared',
+      'wishlist_item_added',
+      'item_received'
     ],
     required: true
   },

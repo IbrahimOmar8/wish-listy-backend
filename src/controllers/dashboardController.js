@@ -75,39 +75,111 @@ exports.getHomeData = async (req, res) => {
       .sort((a, b) => new Date(a.date) - new Date(b.date)); // Sort by date ascending (nearest first)
 
     // Get latest activity preview (optional - limit to 3 for dashboard preview)
+    // Fetch activities directly from Items (not from Notifications)
     let latestActivityPreview = [];
     if (friendIds.length > 0) {
-      const activityTypes = [
-        'item_purchased',
-        'item_reserved',
-        'wishlist_shared',
-        'event_invitation_accepted'
-      ];
+      // Time constraint: Only activities from the last 15 days
+      const fifteenDaysAgo = new Date(now.getTime() - (15 * 24 * 60 * 60 * 1000));
 
-      const previewNotifications = await Notification.find({
-        relatedUser: { $in: friendIds },
-        type: { $in: activityTypes }
-      })
+      // Get wishlist IDs owned by friends with owner info
+      const friendWishlists = await Wishlist.find({ owner: { $in: friendIds } })
+        .select('_id owner name')
         .populate({
-          path: 'relatedUser',
+          path: 'owner',
           select: '_id fullName username profileImage'
         })
-        .sort({ createdAt: -1 })
-        .limit(3)
         .lean();
 
-      latestActivityPreview = previewNotifications.map(notif => ({
-        _id: notif._id,
-        type: notif.type,
-        message: notif.message,
-        actor: {
-          _id: notif.relatedUser._id,
-          fullName: notif.relatedUser.fullName,
-          username: notif.relatedUser.username,
-          profileImage: notif.relatedUser.profileImage
-        },
-        createdAt: notif.createdAt
-      }));
+      if (friendWishlists.length > 0) {
+        const wishlistIds = friendWishlists.map(w => w._id);
+        const wishlistOwnerMap = new Map(
+          friendWishlists.map(w => [w._id.toString(), w.owner])
+        );
+        const wishlistNameMap = new Map(
+          friendWishlists.map(w => [w._id.toString(), w.name])
+        );
+
+        // Get items added by friends (created in last 15 days)
+        const addedItems = await Item.find({
+          wishlist: { $in: wishlistIds },
+          createdAt: { $gte: fifteenDaysAgo }
+        })
+          .select('_id name wishlist createdAt')
+          .sort({ createdAt: -1 })
+          .limit(10)
+          .lean();
+
+        // Get items marked as received by friends (updated in last 15 days)
+        const receivedItems = await Item.find({
+          wishlist: { $in: wishlistIds },
+          isReceived: true,
+          updatedAt: { $gte: fifteenDaysAgo }
+        })
+          .select('_id name wishlist updatedAt')
+          .sort({ updatedAt: -1 })
+          .limit(10)
+          .lean();
+
+        // Combine and transform activities
+        const activities = [];
+
+        // Add "item_added" activities
+        for (const item of addedItems) {
+          const wishlistIdStr = item.wishlist.toString();
+          const owner = wishlistOwnerMap.get(wishlistIdStr);
+          const wishlistName = wishlistNameMap.get(wishlistIdStr);
+          
+          if (owner) {
+            activities.push({
+              _id: item._id,
+              type: 'wishlist_item_added',
+              actor: {
+                _id: owner._id,
+                fullName: owner.fullName,
+                username: owner.username,
+                profileImage: owner.profileImage
+              },
+              target: {
+                type: 'item',
+                itemName: item.name,
+                wishlistName: wishlistName
+              },
+              createdAt: item.createdAt
+            });
+          }
+        }
+
+        // Add "item_received" activities
+        for (const item of receivedItems) {
+          const wishlistIdStr = item.wishlist.toString();
+          const owner = wishlistOwnerMap.get(wishlistIdStr);
+          const wishlistName = wishlistNameMap.get(wishlistIdStr);
+          
+          if (owner) {
+            activities.push({
+              _id: item._id,
+              type: 'item_received',
+              actor: {
+                _id: owner._id,
+                fullName: owner.fullName,
+                username: owner.username,
+                profileImage: owner.profileImage
+              },
+              target: {
+                type: 'item',
+                itemName: item.name,
+                wishlistName: wishlistName
+              },
+              createdAt: item.updatedAt
+            });
+          }
+        }
+
+        // Sort by createdAt descending and limit to 3
+        latestActivityPreview = activities
+          .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+          .slice(0, 3);
+      }
     }
 
     // Construct response
