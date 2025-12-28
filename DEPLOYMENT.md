@@ -1,6 +1,6 @@
-# Wish Listy Backend - Deployment Guide
+# 🚀 دليل رفع Wish-Listy على Render.com
 
-Complete guide to deploy your Wish Listy backend API to production.
+دليل شامل لرفع مشروع Wish-Listy Backend API مع دعم Socket.IO على Render.com
 
 ## 🚀 Quick Start (Local Development)
 
