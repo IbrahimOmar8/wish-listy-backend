@@ -12,16 +12,16 @@ const notificationSchema = new mongoose.Schema({
     enum: [
       'friend_request',
       'friend_request_accepted',
-      'friend_request_rejected',
       'event_invitation',
       'event_invitation_accepted',
-      'event_invitation_declined',
       'event_invitation_maybe',
       'item_purchased',
       'item_reserved',
-      'wishlist_shared',
-      'wishlist_item_added',
-      'item_received'
+      'item_unreserved',
+      'item_received',
+      'event_invite',
+      'event_update',
+      'event_response'
     ],
     required: true
   },
@@ -42,6 +42,12 @@ const notificationSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     default: null,
     // Can reference FriendRequest, Event, Item, etc.
+  },
+  relatedWishlistId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Wishlist',
+    default: null,
+    // Used for Item-related notifications to enable smart navigation
   },
   isRead: {
     type: Boolean,

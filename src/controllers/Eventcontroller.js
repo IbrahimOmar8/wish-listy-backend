@@ -2,7 +2,7 @@ const Event = require('../models/Event');
 const EventInvitation = require('../models/Eventinvitation');
 const Wishlist = require('../models/Wishlist');
 const User = require('../models/User');
-const Notification = require('../models/Notification');
+const { createNotification } = require('../utils/notificationHelper');
 
 // Helper function to populate invited_friends.user if not already populated
 // Handles both old format (array of ObjectIds) and new format (array of objects with user field)
@@ -348,6 +348,30 @@ exports.createEvent = async (req, res) => {
       await EventInvitation.insertMany(invitations, { ordered: false }).catch(err => {
         // Ignore duplicate key errors (in case of re-invitations)
         console.log('Some invitations may have already existed:', err.message);
+      });
+
+      // Get creator info for notification message
+      const creator = await User.findById(req.user.id).select('fullName');
+      const creatorName = creator?.fullName || 'Someone';
+
+      // Create notifications for all invited friends
+      const notificationPromises = invitedFriendsArray.map(invitedFriend => 
+        createNotification({
+          recipientId: invitedFriend.user,
+          senderId: req.user.id, // Event creator is the sender
+          type: 'event_invite',
+          title: 'Event Invitation',
+          message: `${creatorName} invited you to ${name}.`,
+          relatedId: event._id,
+          emitSocketEvent: true,
+          socketIo: req.app.get('io')
+        })
+      );
+
+      // Execute all notification creations in parallel
+      await Promise.all(notificationPromises).catch(err => {
+        // Log errors but don't fail the event creation
+        console.error('Error creating event invitation notifications:', err);
       });
     }
 
@@ -759,6 +783,14 @@ exports.updateEvent = async (req, res) => {
     
     // Update EventInvitation records if invited_friends was updated
     if (invitedFriendsArray !== null) {
+      // Get existing friend IDs to identify new ones
+      const existingFriendIds = (event.invited_friends || []).map(inv => 
+        inv.user ? inv.user.toString() : inv.toString()
+      );
+      const newFriendIds = invitedFriendsArray
+        .map(inv => inv.user.toString())
+        .filter(id => !existingFriendIds.includes(id));
+
       // Remove old invitations
       await EventInvitation.deleteMany({ event: id });
       
@@ -778,6 +810,60 @@ exports.updateEvent = async (req, res) => {
       
       // Re-populate the event to get updated invited_friends
       await updatedEvent.populate('invited_friends.user', 'fullName username profileImage');
+
+      // Send notifications ONLY to newly added friends
+      if (newFriendIds.length > 0) {
+        const creator = await User.findById(req.user.id).select('fullName');
+        const creatorName = creator?.fullName || 'Someone';
+        const eventName = updatedEvent.name || event.name;
+
+        const notificationPromises = newFriendIds.map(friendId =>
+          createNotification({
+            recipientId: friendId,
+            senderId: req.user.id,
+            type: 'event_invite',
+            title: 'Event Invitation',
+            message: `${creatorName} invited you to ${eventName}.`,
+            relatedId: id,
+            emitSocketEvent: true,
+            socketIo: req.app.get('io')
+          })
+        );
+
+        await Promise.all(notificationPromises).catch(err => {
+          console.error('Error creating event invitation notifications:', err);
+        });
+      }
+    }
+
+    // Check if critical details changed (date, time, or location)
+    const criticalFieldsChanged = 
+      (filteredUpdates.date && new Date(filteredUpdates.date).getTime() !== new Date(event.date).getTime()) ||
+      (filteredUpdates.time && filteredUpdates.time !== event.time) ||
+      (filteredUpdates.location && filteredUpdates.location !== event.location);
+
+    // If critical details changed, notify all invited friends
+    if (criticalFieldsChanged && updatedEvent && updatedEvent.invited_friends && updatedEvent.invited_friends.length > 0) {
+      const eventName = updatedEvent.name || event.name;
+      const notificationPromises = updatedEvent.invited_friends.map(inv => {
+        const friendId = inv.user?._id || inv.user;
+        if (!friendId) return null;
+
+        return createNotification({
+          recipientId: friendId,
+          senderId: req.user.id,
+          type: 'event_update',
+          title: 'Event Update',
+          message: `Update: Details for ${eventName} have changed.`,
+          relatedId: id,
+          emitSocketEvent: true,
+          socketIo: req.app.get('io')
+        });
+      }).filter(Boolean); // Remove null values
+
+      await Promise.all(notificationPromises).catch(err => {
+        console.error('Error creating event update notifications:', err);
+      });
     }
 
     // Transform invited_friends to ensure user is properly formatted
@@ -1112,61 +1198,23 @@ exports.respondToInvitation = async (req, res) => {
     // Don't send notification when status is reset to 'pending' (user is undoing their response)
     if (previousStatus !== responseStatus && event.creator.toString() !== req.user.id && responseStatus !== 'pending') {
       const statusMessages = {
-        'accepted': 'accepted',
-        'declined': 'declined',
-        'maybe': 'might attend',
-        'pending': 'reset their response to pending'
+        'accepted': 'going',
+        'declined': 'not going',
+        'maybe': 'might attend'
       };
 
-      // Set notification type based on response status
-      const notificationType = `event_invitation_${responseStatus}`;
+      const statusMessage = statusMessages[responseStatus] || responseStatus;
 
-      await Notification.create({
-        user: event.creator,
-        type: notificationType,
-        title: 'Event Invitation Response',
-        message: `${respondingUser.fullName} ${statusMessages[responseStatus]} your invitation to: ${event.name}`,
-        relatedUser: req.user.id,
-        relatedId: event._id
+      await createNotification({
+        recipientId: event.creator,
+        senderId: req.user.id,
+        type: 'event_response',
+        title: 'Event Response',
+        message: `${respondingUser.fullName} is ${statusMessage} to ${event.name}.`,
+        relatedId: event._id,
+        emitSocketEvent: true,
+        socketIo: req.app.get('io')
       });
-
-      // Helper function to calculate unreadCount (similar to friendController)
-      const getUnreadCountWithBadge = async (userId) => {
-        const user = await User.findById(userId).select('lastBadgeSeenAt');
-        const query = {
-          user: userId,
-          isRead: false
-        };
-        if (user && user.lastBadgeSeenAt) {
-          query.createdAt = { $gt: user.lastBadgeSeenAt };
-        }
-        return await Notification.countDocuments(query);
-      };
-
-      // Calculate creator's current unreadCount with badge dismissal logic
-      const unreadCount = await getUnreadCountWithBadge(event.creator);
-
-      // Emit socket event if io is available (only if not pending)
-      if (req.app.get('io') && responseStatus !== 'pending') {
-        const statusMessages = {
-          'accepted': 'accepted',
-          'declined': 'declined',
-          'maybe': 'might attend'
-        };
-        req.app.get('io').to(event.creator.toString()).emit('event_invitation_response', {
-          eventId: event._id,
-          eventName: event.name,
-          user: {
-            _id: respondingUser._id,
-            fullName: respondingUser.fullName,
-            username: respondingUser.username,
-            profileImage: respondingUser.profileImage
-          },
-          status: responseStatus,
-          message: `${respondingUser.fullName} ${statusMessages[responseStatus]} your invitation to: ${event.name}`,
-          unreadCount
-        });
-      }
     }
 
     // Get the updated event with populated fields

@@ -1,5 +1,7 @@
 const Item = require('../models/Item');
 const Wishlist = require('../models/Wishlist');
+const Reservation = require('../models/Reservation');
+const { createNotification } = require('../utils/notificationHelper');
 const mongoose = require('mongoose');
 
 exports.addItem = async (req, res) => {
@@ -445,21 +447,64 @@ exports.markItemAsPurchased = async (req, res) => {
     const { id } = req.params;
     const { purchasedBy } = req.body;
 
-    const item = await Item.findByIdAndUpdate(
-      id,
-      {
-        isPurchased: true,
-        purchasedBy: purchasedBy || req.user?.id || null,
-        purchasedAt: new Date()
-      },
-      { new: true }
-    ).populate('purchasedBy', 'fullName username');
+    // First, get the item to check if it was already purchased
+    const existingItem = await Item.findById(id).populate({
+      path: 'wishlist',
+      select: 'owner',
+      populate: { path: 'owner', select: '_id fullName' }
+    });
 
-    if (!item) {
+    if (!existingItem) {
       return res.status(404).json({
         success: false,
         message: 'Item not found'
       });
+    }
+
+    // Only send notification if item wasn't already purchased
+    const wasAlreadyPurchased = existingItem.isPurchased;
+    const purchaserId = purchasedBy || req.user?.id || null;
+
+    const item = await Item.findByIdAndUpdate(
+      id,
+      {
+        isPurchased: true,
+        purchasedBy: purchaserId,
+        purchasedAt: new Date()
+      },
+      { new: true }
+    ).populate('purchasedBy', 'fullName username')
+     .populate({
+       path: 'wishlist',
+       select: 'owner name',
+       populate: { path: 'owner', select: '_id fullName' }
+     });
+
+    // Create notification for the wishlist owner if item wasn't already purchased
+    if (!wasAlreadyPurchased && item.wishlist && item.wishlist.owner) {
+      // Ensure we get wishlist ID correctly (handle both populated object and ObjectId)
+      let wishlistId;
+      if (item.wishlist && typeof item.wishlist === 'object' && item.wishlist._id) {
+        wishlistId = item.wishlist._id;
+      } else if (item.wishlist) {
+        wishlistId = item.wishlist; // It's already an ObjectId
+      }
+      
+      if (wishlistId) {
+        await createNotification({
+          recipientId: item.wishlist.owner._id,
+          senderId: null, // Don't reveal purchaser for privacy/surprise
+          type: 'item_purchased',
+          title: 'Gift Purchased',
+          message: 'Congratulations! A gift has been purchased for you! 🎉',
+          relatedId: id,
+          relatedWishlistId: wishlistId, // Critical for smart navigation on frontend
+          emitSocketEvent: true,
+          socketIo: req.app.get('io')
+        });
+      } else {
+        console.error('Warning: Could not find wishlistId for item:', id);
+      }
     }
 
     res.status(200).json({
@@ -560,16 +605,17 @@ exports.updateItemStatus = async (req, res) => {
     const { isReceived } = req.body;
     const userId = req.user.id;
 
-    // Find item with wishlist populated
+    // Find item with wishlist and purchasedBy populated
     const item = await Item.findById(id)
       .populate({
         path: 'wishlist',
-        select: 'owner',
+        select: 'owner _id',
         populate: {
           path: 'owner',
           select: '_id fullName username'
         }
-      });
+      })
+      .populate('purchasedBy', '_id fullName username');
 
     if (!item) {
       return res.status(404).json({
@@ -594,9 +640,67 @@ exports.updateItemStatus = async (req, res) => {
       });
     }
 
+    // Check previous state to only send notification when status changes to received
+    const previousIsReceived = item.isReceived;
+    
     // Update isReceived
     item.isReceived = isReceived !== undefined ? isReceived : !item.isReceived;
     await item.save();
+
+    // Create notification when item is marked as received (only if it changed from false to true)
+    // The notification should be sent to the person who reserved/purchased the item (not the owner)
+    if (item.isReceived && !previousIsReceived && item.wishlist) {
+      // Identify the giver (person who reserved/purchased the item)
+      // Priority: 1) purchasedBy (if purchased), 2) active reservation reserver
+      let giverId = null;
+      
+      // First, check if item was purchased
+      if (item.purchasedBy) {
+        giverId = item.purchasedBy._id || item.purchasedBy;
+      } else {
+        // If not purchased, check for active reservations
+        const activeReservation = await Reservation.findOne({
+          item: id,
+          status: 'reserved'
+        }).select('reserver');
+        
+        if (activeReservation && activeReservation.reserver) {
+          giverId = activeReservation.reserver;
+        }
+      }
+      
+      // Only send notification if there's a giver (someone reserved/purchased the item)
+      if (giverId) {
+        // Ensure we get wishlist ID correctly (handle both populated object and ObjectId)
+        let wishlistId;
+        if (item.wishlist && typeof item.wishlist === 'object' && item.wishlist._id) {
+          wishlistId = item.wishlist._id;
+        } else if (item.wishlist) {
+          wishlistId = item.wishlist; // It's already an ObjectId
+        }
+        
+        // Get owner name for the message
+        const ownerName = item.wishlist.owner?.fullName || 'Someone';
+        const itemName = item.name || 'a gift';
+        
+        if (wishlistId) {
+          await createNotification({
+            recipientId: giverId, // The giver (person who reserved/purchased)
+            senderId: req.user.id, // The owner (who marked as received)
+            type: 'item_received',
+            title: 'Gift Received',
+            message: `${ownerName} received your gift '${itemName}'! 🎁`,
+            relatedId: id,
+            relatedWishlistId: wishlistId, // Critical for smart navigation on frontend
+            emitSocketEvent: true,
+            socketIo: req.app.get('io')
+          });
+        } else {
+          console.error('Warning: Could not find wishlistId for item:', id);
+        }
+      }
+      // If no giver found (no reservation/purchase), silently skip notification (by design)
+    }
 
     // Fetch updated item for response
     const updatedItem = await Item.findById(id)

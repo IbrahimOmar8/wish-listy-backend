@@ -1,7 +1,7 @@
 const Reservation = require('../models/Reservation');
 const Item = require('../models/Item');
 const Wishlist = require('../models/Wishlist');
-const Notification = require('../models/Notification');
+const { createNotification } = require('../utils/notificationHelper');
 
 /**
  * Toggle reservation (Reserve/Unreserve) for an item
@@ -35,7 +35,7 @@ exports.reserveItem = async (req, res) => {
     // Get item with wishlist and owner info
     const item = await Item.findById(itemId).populate({
       path: 'wishlist',
-      select: 'owner name',
+      select: 'owner name _id',
       populate: { path: 'owner', select: 'fullName username' },
     });
 
@@ -152,29 +152,34 @@ exports.reserveItem = async (req, res) => {
       await reservation.save();
     }
 
-    // Create notification for the item owner (without revealing who reserved it)
-    const notification = await Notification.create({
-      user: item.wishlist.owner._id,
+    // Create notification for the item owner (without revealing who reserved it - privacy protection)
+    // Ensure we get wishlist ID correctly (handle both populated object and ObjectId)
+    let wishlistId;
+    if (item.wishlist && typeof item.wishlist === 'object' && item.wishlist._id) {
+      wishlistId = item.wishlist._id;
+    } else if (item.wishlist) {
+      wishlistId = item.wishlist; // It's already an ObjectId
+    } else {
+      // Fallback: get wishlist from item directly if not populated
+      const itemWithWishlist = await Item.findById(itemId).select('wishlist').lean();
+      wishlistId = itemWithWishlist?.wishlist;
+    }
+    
+    if (!wishlistId) {
+      console.error('Warning: Could not find wishlistId for item:', itemId);
+    }
+    
+    await createNotification({
+      recipientId: item.wishlist.owner._id,
+      senderId: null, // Don't reveal sender for privacy
       type: 'item_reserved',
       title: 'Item Reserved',
-      message: `Someone has reserved "${item.name}" from your wishlist "${item.wishlist.name}"`,
+      message: 'Someone has reserved a gift for you! 🤫',
       relatedId: itemId,
+      relatedWishlistId: wishlistId, // Critical for smart navigation on frontend
+      emitSocketEvent: true,
+      socketIo: req.app.get('io')
     });
-
-    // Emit real-time notification to owner
-    const unreadCount = await Notification.countDocuments({
-      user: item.wishlist.owner._id,
-      isRead: false,
-    });
-
-    // Emit socket event if io is available
-    if (req.app.get('io')) {
-      const populatedNotification = await notification.populate('relatedUser', 'fullName username profileImage');
-      req.app.get('io').to(item.wishlist.owner._id.toString()).emit('item_reserved', {
-        notification: populatedNotification,
-        unreadCount,
-      });
-    }
 
     return res.status(200).json({
       success: true,
@@ -229,6 +234,40 @@ exports.cancelReservation = async (req, res) => {
 
     reservation.status = 'cancelled';
     await reservation.save();
+
+    // Get item with wishlist to notify owner
+    const item = await Item.findById(itemId).populate({
+      path: 'wishlist',
+      select: 'owner _id',
+      populate: { path: 'owner', select: '_id' }
+    });
+
+    // Create notification for the item owner when reservation is cancelled
+    if (item && item.wishlist && item.wishlist.owner) {
+      // Ensure we get wishlist ID correctly (handle both populated object and ObjectId)
+      let wishlistId;
+      if (item.wishlist && typeof item.wishlist === 'object' && item.wishlist._id) {
+        wishlistId = item.wishlist._id;
+      } else if (item.wishlist) {
+        wishlistId = item.wishlist; // It's already an ObjectId
+      }
+      
+      if (wishlistId) {
+        await createNotification({
+          recipientId: item.wishlist.owner._id,
+          senderId: null, // Don't reveal sender for privacy
+          type: 'item_unreserved',
+          title: 'Item Available',
+          message: 'A gift in your wishlist is available again.',
+          relatedId: itemId,
+          relatedWishlistId: wishlistId, // Critical for smart navigation on frontend
+          emitSocketEvent: true,
+          socketIo: req.app.get('io')
+        });
+      } else {
+        console.error('Warning: Could not find wishlistId for item:', itemId);
+      }
+    }
 
     return res.status(200).json({
       success: true,
