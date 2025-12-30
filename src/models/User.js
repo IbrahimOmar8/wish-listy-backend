@@ -45,6 +45,15 @@ const userSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
   }],
+  interests: [{
+    type: String,
+    enum: [
+      'Watches', 'Perfumes', 'Sneakers', 'Jewelry', 'Handbags', 'Makeup & Skincare',
+      'Gadgets', 'Gaming', 'Photography', 'Home Decor', 'Plants', 
+      'Coffee & Tea', 'Books', 'Fitness Gear', 'Car Accessories', 'Music Instruments', 'Art', 'DIY & Crafts'
+    ],
+    default: []
+  }],
   lastBadgeSeenAt: {
     type: Date,
     default: null

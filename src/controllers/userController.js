@@ -124,6 +124,72 @@ exports.searchUsers = async (req, res) => {
   }
 };
 
+// Update user interests
+exports.updateUserInterests = async (req, res) => {
+  try {
+    const { interests } = req.body;
+    const userId = req.user.id;
+
+    // Validate that interests is provided and is an array
+    if (!Array.isArray(interests)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Interests must be an array'
+      });
+    }
+
+    // Define valid interests enum
+    const validInterests = [
+      'Watches', 'Perfumes', 'Sneakers', 'Jewelry', 'Handbags', 'Makeup & Skincare',
+      'Gadgets', 'Gaming', 'Photography', 'Home Decor', 'Plants', 
+      'Coffee & Tea', 'Books', 'Fitness Gear', 'Car Accessories', 'Music Instruments', 'Art', 'DIY & Crafts'
+    ];
+
+    // Remove duplicates from the array
+    const uniqueInterests = [...new Set(interests)];
+
+    // Validate each interest against the enum list
+    const invalidInterests = uniqueInterests.filter(interest => !validInterests.includes(interest));
+
+    if (invalidInterests.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid interests: ${invalidInterests.map(i => `'${i}'`).join(', ')} are not valid interests`,
+        errors: invalidInterests
+      });
+    }
+
+    // Update user's interests
+    const user = await User.findByIdAndUpdate(
+      userId,
+      { interests: uniqueInterests },
+      { new: true, runValidators: true }
+    ).select('interests');
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Interests updated successfully',
+      data: {
+        interests: user.interests
+      }
+    });
+  } catch (error) {
+    console.error('Update user interests error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error updating interests',
+      error: error.message
+    });
+  }
+};
+
 // Get user profile by ID
 exports.getUserProfile = async (req, res) => {
   try {
