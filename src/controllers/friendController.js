@@ -2,19 +2,7 @@ const FriendRequest = require('../models/FriendRequest');
 const User = require('../models/User');
 const Notification = require('../models/Notification');
 const Wishlist = require('../models/Wishlist');
-
-// Helper function to calculate unreadCount with badge dismissal logic
-const getUnreadCountWithBadge = async (userId) => {
-  const user = await User.findById(userId).select('lastBadgeSeenAt');
-  const query = {
-    user: userId,
-    isRead: false
-  };
-  if (user && user.lastBadgeSeenAt) {
-    query.createdAt = { $gt: user.lastBadgeSeenAt };
-  }
-  return await Notification.countDocuments(query);
-};
+const { createNotification, getUnreadCountWithBadge } = require('../utils/notificationHelper');
 
 // Send friend request
 exports.sendFriendRequest = async (req, res) => {
@@ -26,7 +14,7 @@ exports.sendFriendRequest = async (req, res) => {
     if (!toUserId) {
       return res.status(400).json({
         success: false,
-        message: 'Recipient user ID is required'
+        message: req.t('validation.val_recipient_id_required')
       });
     }
 
@@ -81,28 +69,22 @@ exports.sendFriendRequest = async (req, res) => {
     await friendRequest.populate('from', '_id fullName username profileImage');
     await friendRequest.populate('to', '_id fullName username profileImage');
 
-    // Create notification for the receiver
-    await Notification.create({
-      user: toUserId,
+    // Create notification for the receiver with dynamic localization
+    await createNotification({
+      recipientId: toUserId,
+      senderId: fromUserId,
       type: 'friend_request',
       title: 'New Friend Request',
-      message: `${friendRequest.from.fullName} sent you a friend request`,
-      relatedUser: fromUserId,
-      relatedId: friendRequest._id
+      messageKey: 'notif.friend_request',
+      messageVariables: {
+        senderName: friendRequest.from.fullName
+      },
+      relatedId: friendRequest._id,
+      emitSocketEvent: true,
+      socketIo: req.app.get('io')
     });
 
-    // Calculate recipient's current unreadCount with badge dismissal logic
-    const unreadCount = await getUnreadCountWithBadge(toUserId);
-
-    // Emit socket event if io is available
-    if (req.app.get('io')) {
-      req.app.get('io').to(toUserId).emit('friend_request', {
-        requestId: friendRequest._id,
-        from: friendRequest.from,
-        message: `${friendRequest.from.fullName} sent you a friend request`,
-        unreadCount
-      });
-    }
+    // Socket event is now handled by createNotification helper
 
     res.status(201).json({
       success: true,
@@ -157,7 +139,7 @@ exports.respondToFriendRequest = async (req, res) => {
     if (!action || !['accept', 'reject'].includes(action)) {
       return res.status(400).json({
         success: false,
-        message: 'Action must be either "accept" or "reject"'
+        message: req.t('validation.val_action_invalid', { action1: 'accept', action2: 'reject' })
       });
     }
 
@@ -204,28 +186,20 @@ exports.respondToFriendRequest = async (req, res) => {
         { $addToSet: { friends: friendRequest.from._id } }
       );
 
-      // Create notification for the sender
-      await Notification.create({
-        user: friendRequest.from._id,
+      // Create notification for the sender with dynamic localization
+      await createNotification({
+        recipientId: friendRequest.from._id,
+        senderId: friendRequest.to._id,
         type: 'friend_request_accepted',
         title: 'Friend Request Accepted',
-        message: `${friendRequest.to.fullName} accepted your friend request`,
-        relatedUser: friendRequest.to._id,
-        relatedId: friendRequest._id
+        messageKey: 'notif.friend_request_accepted',
+        messageVariables: {
+          senderName: friendRequest.to.fullName
+        },
+        relatedId: friendRequest._id,
+        emitSocketEvent: true,
+        socketIo: req.app.get('io')
       });
-
-      // Calculate sender's current unreadCount with badge dismissal logic
-      const unreadCount = await getUnreadCountWithBadge(friendRequest.from._id);
-
-      // Emit socket event if io is available
-      if (req.app.get('io')) {
-        req.app.get('io').to(friendRequest.from._id.toString()).emit('friend_request_accepted', {
-          requestId: friendRequest._id,
-          user: friendRequest.to,
-          message: `${friendRequest.to.fullName} accepted your friend request`,
-          unreadCount
-        });
-      }
 
       res.status(200).json({
         success: true,

@@ -13,7 +13,7 @@ exports.verifyPasswordAndLogin = async (req, res) => {
     if (!username || !password) {
       return res.status(400).json({
         success: false,
-        message: 'Username and password are required'
+        message: req.t('auth.username_password_required')
       });
     }
 
@@ -23,7 +23,7 @@ exports.verifyPasswordAndLogin = async (req, res) => {
     if (!user) {
       return res.status(400).json({
         success: false,
-        message: 'User not found'
+        message: req.t('auth.user_not_found')
       });
     }
 
@@ -33,7 +33,7 @@ exports.verifyPasswordAndLogin = async (req, res) => {
     if (!isMatch) {
       return res.status(400).json({
         success: false,
-        message: 'Invalid password'
+        message: req.t('auth.invalid_password')
       });
     }
 
@@ -41,6 +41,7 @@ exports.verifyPasswordAndLogin = async (req, res) => {
 
     res.status(200).json({
       success: true,
+      message: req.t('auth.login_success'),
       token,
       user: {
         id: user._id,
@@ -53,7 +54,7 @@ exports.verifyPasswordAndLogin = async (req, res) => {
     console.error('Verify Password Error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to verify password'
+      message: req.t('common.server_error')
     });
   }
 };
@@ -66,7 +67,7 @@ exports.register = async (req, res) => {
     if (!fullName || !username || !password) {
       return res.status(400).json({
         success: false,
-        message: 'Full name, username, and password are required'
+        message: req.t('auth.fullname_username_password_required')
       });
     }
 
@@ -74,7 +75,7 @@ exports.register = async (req, res) => {
     if (typeof fullName !== 'string' || fullName.trim().length === 0) {
       return res.status(400).json({
         success: false,
-        message: 'Full name must be a non-empty string'
+        message: req.t('auth.fullname_required')
       });
     }
 
@@ -82,7 +83,7 @@ exports.register = async (req, res) => {
     if (typeof username !== 'string' || username.trim().length < 3) {
       return res.status(400).json({
         success: false,
-        message: 'Username must be at least 3 characters long'
+        message: req.t('auth.username_required')
       });
     }
 
@@ -91,7 +92,7 @@ exports.register = async (req, res) => {
     if (!usernameRegex.test(username)) {
       return res.status(400).json({
         success: false,
-        message: 'Username can only contain letters, numbers, underscores, and hyphens'
+        message: req.t('auth.username_format')
       });
     }
 
@@ -99,7 +100,7 @@ exports.register = async (req, res) => {
     if (typeof password !== 'string' || password.length < 6) {
       return res.status(400).json({
         success: false,
-        message: 'Password must be at least 6 characters long'
+        message: req.t('auth.password_required')
       });
     }
 
@@ -109,7 +110,7 @@ exports.register = async (req, res) => {
     if (existingUser) {
       return res.status(400).json({
         success: false,
-        message: 'Username already exists'
+        message: req.t('auth.username_exists')
       });
     }
 
@@ -151,13 +152,13 @@ exports.register = async (req, res) => {
     if (error.code === 11000) {
       return res.status(400).json({
         success: false,
-        message: 'Username already exists'
+        message: req.t('auth.username_exists')
       });
     }
 
     res.status(500).json({
       success: false,
-      message: 'Failed to register user'
+      message: req.t('auth.registration_failed')
     });
   }
 };
@@ -173,7 +174,7 @@ exports.getMe = async (req, res) => {
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Failed to get user data'
+      message: req.t('auth.get_user_failed')
     });
   }
 };
@@ -186,12 +187,12 @@ exports.logout = async (req, res) => {
     // server-side logging or future token blacklisting if needed.
     res.status(200).json({
       success: true,
-      message: 'Logged out successfully'
+      message: req.t('auth.logout_success')
     });
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Error logging out',
+      message: req.t('auth.logout_failed'),
       error: error.message
     });
   }

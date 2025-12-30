@@ -20,7 +20,7 @@ exports.reserveItem = async (req, res) => {
     if (quantity < 1) {
       return res.status(400).json({
         success: false,
-        message: 'Quantity must be at least 1',
+        message: req.t('validation.val_quantity_min', { min: 1 }),
       });
     }
 
@@ -28,7 +28,7 @@ exports.reserveItem = async (req, res) => {
     if (action && !['reserve', 'cancel'].includes(action)) {
       return res.status(400).json({
         success: false,
-        message: 'Action must be either "reserve" or "cancel"',
+        message: req.t('validation.val_action_invalid', { action1: 'reserve', action2: 'cancel' }),
       });
     }
 
@@ -174,7 +174,8 @@ exports.reserveItem = async (req, res) => {
       senderId: null, // Don't reveal sender for privacy
       type: 'item_reserved',
       title: 'Item Reserved',
-      message: 'Someone has reserved a gift for you! 🤫',
+      messageKey: 'notif.item_reserved', // Use translation key for dynamic localization
+      messageVariables: {}, // No variables needed for this message
       relatedId: itemId,
       relatedWishlistId: wishlistId, // Critical for smart navigation on frontend
       emitSocketEvent: true,
@@ -258,7 +259,8 @@ exports.cancelReservation = async (req, res) => {
           senderId: null, // Don't reveal sender for privacy
           type: 'item_unreserved',
           title: 'Item Available',
-          message: 'A gift in your wishlist is available again.',
+          messageKey: 'notif.item_unreserved', // Use translation key for dynamic localization
+          messageVariables: {}, // No variables needed for this message
           relatedId: itemId,
           relatedWishlistId: wishlistId, // Critical for smart navigation on frontend
           emitSocketEvent: true,

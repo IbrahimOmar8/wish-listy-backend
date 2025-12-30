@@ -13,14 +13,14 @@ exports.searchUsers = async (req, res) => {
     if (!type || !value) {
       return res.status(400).json({
         success: false,
-        message: 'Both type and value query parameters are required'
+        message: req.t('validation.val_search_params_required')
       });
     }
 
     if (!['username', 'email', 'phone'].includes(type)) {
       return res.status(400).json({
         success: false,
-        message: 'Type must be one of: username, email, phone'
+        message: req.t('validation.val_search_type_invalid', { types: 'username, email, phone' })
       });
     }
 
@@ -134,7 +134,7 @@ exports.updateUserInterests = async (req, res) => {
     if (!Array.isArray(interests)) {
       return res.status(400).json({
         success: false,
-        message: 'Interests must be an array'
+        message: req.t('validation.val_interests_array')
       });
     }
 
@@ -154,7 +154,7 @@ exports.updateUserInterests = async (req, res) => {
     if (invalidInterests.length > 0) {
       return res.status(400).json({
         success: false,
-        message: `Invalid interests: ${invalidInterests.map(i => `'${i}'`).join(', ')} are not valid interests`,
+        message: req.t('validation.val_interests_invalid', { interests: invalidInterests.map(i => `'${i}'`).join(', ') }),
         errors: invalidInterests
       });
     }

@@ -54,6 +54,11 @@ const userSchema = new mongoose.Schema({
     ],
     default: []
   }],
+  preferredLanguage: {
+    type: String,
+    enum: ['en', 'ar'],
+    default: 'en'
+  },
   lastBadgeSeenAt: {
     type: Date,
     default: null

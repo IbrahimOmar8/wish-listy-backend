@@ -214,66 +214,66 @@ exports.createEvent = async (req, res) => {
     const errors = {};
 
     if (!name || name.trim().length < 2) {
-      errors.name = 'Event name is required and must be at least 2 characters';
+      errors.name = req.t('validation.val_event_name_required');
     }
 
     if (!date) {
-      errors.date = 'Event date is required';
+      errors.date = req.t('validation.val_event_date_required');
     } else {
       const eventDate = new Date(date);
       if (isNaN(eventDate.getTime())) {
-        errors.date = 'Invalid date format. Use ISO 8601 format';
+        errors.date = req.t('validation.val_event_date_invalid');
       } else if (eventDate <= new Date()) {
-        errors.date = 'Event date must be in the future';
+        errors.date = req.t('validation.val_event_date_future');
       }
     }
 
     if (!time) {
-      errors.time = 'Event time is required';
+      errors.time = req.t('validation.val_event_time_required');
     } else {
       const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/; // HH:MM 24-hour format
       if (!timeRegex.test(time)) {
-        errors.time = 'Invalid time format. Use HH:MM in 24-hour format';
+        errors.time = req.t('validation.val_event_time_invalid');
       }
     }
 
     if (!type) {
-      errors.type = 'Event type is required';
+      errors.type = req.t('validation.val_event_type_required');
     } else {
       const validTypes = ['birthday', 'wedding', 'anniversary', 'graduation', 'holiday', 'baby_shower', 'house_warming', 'other'];
       if (!validTypes.includes(type)) {
-        errors.type = `Invalid event type. Must be one of: ${validTypes.join(', ')}`;
+        errors.type = req.t('validation.val_event_type_invalid', { types: validTypes.join(', ') });
       }
     }
 
     if (!privacy) {
-      errors.privacy = 'Event privacy is required';
+      errors.privacy = req.t('validation.val_event_privacy_required');
     } else {
       const validPrivacy = ['public', 'private', 'friends_only'];
       if (!validPrivacy.includes(privacy)) {
-        errors.privacy = `Invalid privacy option. Must be one of: ${validPrivacy.join(', ')}`;
+        errors.privacy = req.t('validation.val_event_privacy_invalid', { options: validPrivacy.join(', ') });
       }
     }
 
     if (!mode) {
-      errors.mode = 'Event mode is required';
+      errors.mode = req.t('validation.val_event_mode_required');
     } else {
       const validModes = ['in_person', 'online', 'hybrid'];
       if (!validModes.includes(mode)) {
-        errors.mode = `Invalid event mode. Must be one of: ${validModes.join(', ')}`;
+        errors.mode = req.t('validation.val_event_mode_invalid', { modes: validModes.join(', ') });
       }
     }
 
     // Validate meeting_link for online/hybrid events
     if ((mode === 'online' || mode === 'hybrid') && !meeting_link) {
-      errors.meeting_link = 'Meeting link is required for online or hybrid events';
+      errors.meeting_link = req.t('validation.val_meeting_link_required');
     }
 
     // If there are validation errors, return them
     if (Object.keys(errors).length > 0) {
       return res.status(400).json({
         success: false,
-        message: 'Validation error',
+        message: req.t('validation.required'),
         errors
       });
     }
@@ -354,14 +354,18 @@ exports.createEvent = async (req, res) => {
       const creator = await User.findById(req.user.id).select('fullName');
       const creatorName = creator?.fullName || 'Someone';
 
-      // Create notifications for all invited friends
+      // Create notifications for all invited friends with dynamic localization
       const notificationPromises = invitedFriendsArray.map(invitedFriend => 
         createNotification({
           recipientId: invitedFriend.user,
           senderId: req.user.id, // Event creator is the sender
           type: 'event_invite',
           title: 'Event Invitation',
-          message: `${creatorName} invited you to ${name}.`,
+          messageKey: 'notif.event_invite', // Use translation key for dynamic localization
+          messageVariables: {
+            senderName: creatorName,
+            eventName: name
+          },
           relatedId: event._id,
           emitSocketEvent: true,
           socketIo: req.app.get('io')
@@ -434,7 +438,7 @@ exports.createEvent = async (req, res) => {
       });
       return res.status(400).json({
         success: false,
-        message: 'Validation error',
+        message: req.t('validation.required'),
         errors
       });
     }
@@ -766,7 +770,7 @@ exports.updateEvent = async (req, res) => {
       if (!filteredUpdates.meeting_link && !event.meeting_link) {
         return res.status(400).json({
           success: false,
-          message: 'Meeting link is required for online or hybrid events'
+          message: req.t('validation.val_meeting_link_required')
         });
       }
     }
@@ -811,7 +815,7 @@ exports.updateEvent = async (req, res) => {
       // Re-populate the event to get updated invited_friends
       await updatedEvent.populate('invited_friends.user', 'fullName username profileImage');
 
-      // Send notifications ONLY to newly added friends
+      // Send notifications ONLY to newly added friends with dynamic localization
       if (newFriendIds.length > 0) {
         const creator = await User.findById(req.user.id).select('fullName');
         const creatorName = creator?.fullName || 'Someone';
@@ -823,7 +827,11 @@ exports.updateEvent = async (req, res) => {
             senderId: req.user.id,
             type: 'event_invite',
             title: 'Event Invitation',
-            message: `${creatorName} invited you to ${eventName}.`,
+            messageKey: 'notif.event_invite', // Use translation key for dynamic localization
+            messageVariables: {
+              senderName: creatorName,
+              eventName: eventName
+            },
             relatedId: id,
             emitSocketEvent: true,
             socketIo: req.app.get('io')
@@ -842,7 +850,7 @@ exports.updateEvent = async (req, res) => {
       (filteredUpdates.time && filteredUpdates.time !== event.time) ||
       (filteredUpdates.location && filteredUpdates.location !== event.location);
 
-    // If critical details changed, notify all invited friends
+    // If critical details changed, notify all invited friends with dynamic localization
     if (criticalFieldsChanged && updatedEvent && updatedEvent.invited_friends && updatedEvent.invited_friends.length > 0) {
       const eventName = updatedEvent.name || event.name;
       const notificationPromises = updatedEvent.invited_friends.map(inv => {
@@ -854,7 +862,10 @@ exports.updateEvent = async (req, res) => {
           senderId: req.user.id,
           type: 'event_update',
           title: 'Event Update',
-          message: `Update: Details for ${eventName} have changed.`,
+          messageKey: 'notif.event_update', // Use translation key for dynamic localization
+          messageVariables: {
+            eventName: eventName
+          },
           relatedId: id,
           emitSocketEvent: true,
           socketIo: req.app.get('io')
@@ -903,7 +914,7 @@ exports.updateEvent = async (req, res) => {
       });
       return res.status(400).json({
         success: false,
-        message: 'Validation error',
+        message: req.t('validation.required'),
         errors
       });
     }
@@ -1033,7 +1044,7 @@ exports.inviteFriends = async (req, res) => {
     if (!friend_ids || !Array.isArray(friend_ids) || friend_ids.length === 0) {
       return res.status(400).json({
         success: false,
-        message: 'friend_ids array is required'
+        message: req.t('validation.val_friend_ids_required')
       });
     }
 
@@ -1140,7 +1151,7 @@ exports.respondToInvitation = async (req, res) => {
     if (!responseStatus || !validResponses.includes(responseStatus)) {
       return res.status(400).json({
         success: false,
-        message: `Invalid response. Must be one of: ${validResponses.join(', ')}. Provide either 'response' or 'status' field.`
+        message: req.t('validation.val_response_invalid', { responses: validResponses.join(', ') })
       });
     }
 
@@ -1197,20 +1208,25 @@ exports.respondToInvitation = async (req, res) => {
     // Create notification for the event creator (only if status changed and not pending)
     // Don't send notification when status is reset to 'pending' (user is undoing their response)
     if (previousStatus !== responseStatus && event.creator.toString() !== req.user.id && responseStatus !== 'pending') {
-      const statusMessages = {
-        'accepted': 'going',
-        'declined': 'not going',
-        'maybe': 'might attend'
+      // Map response status to translation key
+      const statusMessageKeys = {
+        'accepted': 'notif.event_response_going',
+        'declined': 'notif.event_response_not_going',
+        'maybe': 'notif.event_response_maybe'
       };
 
-      const statusMessage = statusMessages[responseStatus] || responseStatus;
+      const messageKey = statusMessageKeys[responseStatus] || 'notif.event_response_going';
 
       await createNotification({
         recipientId: event.creator,
         senderId: req.user.id,
         type: 'event_response',
         title: 'Event Response',
-        message: `${respondingUser.fullName} is ${statusMessage} to ${event.name}.`,
+        messageKey: messageKey, // Use translation key for dynamic localization
+        messageVariables: {
+          senderName: respondingUser.fullName,
+          eventName: event.name
+        },
         relatedId: event._id,
         emitSocketEvent: true,
         socketIo: req.app.get('io')

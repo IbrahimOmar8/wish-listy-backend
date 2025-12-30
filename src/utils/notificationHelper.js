@@ -1,5 +1,6 @@
 const Notification = require('../models/Notification');
 const User = require('../models/User');
+const i18next = require('i18next');
 
 /**
  * Helper function to calculate unread count with badge dismissal logic
@@ -25,7 +26,9 @@ const getUnreadCountWithBadge = async (userId) => {
  * @param {String|null} options.senderId - User ID who triggered the notification (null for system/private)
  * @param {String} options.type - Notification type (must be in enum)
  * @param {String} options.title - Notification title
- * @param {String} options.message - Notification message
+ * @param {String} [options.message] - Notification message (direct string, used if messageKey not provided)
+ * @param {String} [options.messageKey] - Translation key for dynamic localization (e.g., 'notif.event_invite')
+ * @param {Object} [options.messageVariables] - Variables for interpolation (e.g., { senderName: 'John', eventName: 'Birthday' })
  * @param {String|null} options.relatedId - ID of related entity (Item, Event, etc.)
  * @param {String|null} options.relatedWishlistId - ID of related Wishlist (for Item-related notifications, enables smart navigation)
  * @param {Boolean} options.emitSocketEvent - Whether to emit Socket.IO event (default: true)
@@ -37,20 +40,66 @@ async function createNotification({
   senderId = null,
   type,
   title,
-  message,
+  message = null,
+  messageKey = null,
+  messageVariables = {},
   relatedId = null,
   relatedWishlistId = null,
   emitSocketEvent = true,
   socketIo = null
 }) {
   try {
+    // Determine the final message: use localization if messageKey is provided, otherwise use direct message
+    let finalMessage = message;
+    
+    if (messageKey) {
+      try {
+        // Fetch recipient to get their preferred language
+        const recipient = await User.findById(recipientId).select('preferredLanguage');
+        const lng = (recipient && recipient.preferredLanguage) || 'en';
+        
+        // Ensure i18next is initialized (should be done by middleware, but safety check)
+        if (!i18next.isInitialized) {
+          console.warn('i18next not initialized, falling back to default message');
+          // Fallback: try to get translation anyway (it may still work)
+        }
+        
+        // Get translation function for recipient's language
+        const t = i18next.getFixedT(lng);
+        
+        // Generate localized message with variables
+        finalMessage = t(messageKey, messageVariables);
+        
+        // If translation fails and returns the key, fallback to direct message
+        if (finalMessage === messageKey && message) {
+          console.warn(`Translation key '${messageKey}' not found for language '${lng}', using fallback message`);
+          finalMessage = message;
+        }
+      } catch (error) {
+        console.error('Error generating localized notification message:', error);
+        // Fallback to direct message if localization fails
+        if (message) {
+          finalMessage = message;
+        } else {
+          // Last resort: use the messageKey as message
+          finalMessage = messageKey;
+        }
+      }
+    }
+    
+    // Ensure we have a message
+    if (!finalMessage) {
+      console.error('Warning: Notification created without message. Type:', type);
+      finalMessage = title; // Fallback to title if no message provided
+    }
+    
     // Create notification in database
     const notification = await Notification.create({
       user: recipientId,        // Recipient (who gets the alert)
       relatedUser: senderId,    // Sender (who triggered it - nullable for privacy)
       type,
       title,
-      message,
+      message: finalMessage,
       relatedId,
       relatedWishlistId         // Wishlist ID for Item-related notifications (enables smart navigation)
     });

@@ -11,14 +11,14 @@ exports.addItem = async (req, res) => {
     if (!name || !wishlistId) {
       return res.status(400).json({
         success: false,
-        message: 'Item name and wishlistId are required'
+        message: req.t('validation.val_item_name_required') + ' and ' + req.t('validation.val_wishlist_id_required')
       });
     }
 
     if (typeof name !== 'string' || name.trim().length === 0) {
       return res.status(400).json({
         success: false,
-        message: 'Item name must be a non-empty string'
+        message: req.t('validation.val_item_name_empty')
       });
     }
 
@@ -207,7 +207,7 @@ exports.getItemsByWishlist = async (req, res) => {
     if (!wishlistId || !mongoose.Types.ObjectId.isValid(wishlistId)) {
       return res.status(400).json({
         success: false,
-        message: 'Invalid wishlist ID format'
+        message: req.t('validation.val_wishlist_id_invalid')
       });
     }
 
@@ -496,7 +496,8 @@ exports.markItemAsPurchased = async (req, res) => {
           senderId: null, // Don't reveal purchaser for privacy/surprise
           type: 'item_purchased',
           title: 'Gift Purchased',
-          message: 'Congratulations! A gift has been purchased for you! 🎉',
+          messageKey: 'notif.item_purchased', // Use translation key for dynamic localization
+          messageVariables: {}, // No variables needed for this message
           relatedId: id,
           relatedWishlistId: wishlistId, // Critical for smart navigation on frontend
           emitSocketEvent: true,
@@ -683,21 +684,25 @@ exports.updateItemStatus = async (req, res) => {
         const ownerName = item.wishlist.owner?.fullName || 'Someone';
         const itemName = item.name || 'a gift';
         
-        if (wishlistId) {
-          await createNotification({
-            recipientId: giverId, // The giver (person who reserved/purchased)
-            senderId: req.user.id, // The owner (who marked as received)
-            type: 'item_received',
-            title: 'Gift Received',
-            message: `${ownerName} received your gift '${itemName}'! 🎁`,
-            relatedId: id,
-            relatedWishlistId: wishlistId, // Critical for smart navigation on frontend
-            emitSocketEvent: true,
-            socketIo: req.app.get('io')
-          });
-        } else {
-          console.error('Warning: Could not find wishlistId for item:', id);
-        }
+      if (wishlistId) {
+        await createNotification({
+          recipientId: giverId, // The giver (person who reserved/purchased)
+          senderId: req.user.id, // The owner (who marked as received)
+          type: 'item_received',
+          title: 'Gift Received',
+          messageKey: 'notif.item_received', // Use translation key for dynamic localization
+          messageVariables: {
+            senderName: ownerName,
+            itemName: itemName
+          },
+          relatedId: id,
+          relatedWishlistId: wishlistId, // Critical for smart navigation on frontend
+          emitSocketEvent: true,
+          socketIo: req.app.get('io')
+        });
+      } else {
+        console.error('Warning: Could not find wishlistId for item:', id);
+      }
       }
       // If no giver found (no reservation/purchase), silently skip notification (by design)
     }

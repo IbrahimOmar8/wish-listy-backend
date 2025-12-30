@@ -9,7 +9,7 @@ exports.createWishlist = async (req, res) => {
     if (!name) {
       return res.status(400).json({
         success: false,
-        message: 'Wishlist name is required'
+        message: req.t('validation.val_wishlist_name_required')
       });
     }
 
@@ -294,7 +294,7 @@ exports.shareWishlist = async (req, res) => {
     if (!userId) {
       return res.status(400).json({
         success: false,
-        message: 'User ID is required'
+        message: req.t('validation.val_user_id_required')
       });
     }
 
