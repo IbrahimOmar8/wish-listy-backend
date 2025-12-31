@@ -28,7 +28,16 @@ exports.searchUsers = async (req, res) => {
 
     // Build search query based on type
     if (type === 'username') {
-      searchQuery.username = { $regex: `^${value}`, $options: 'i' };
+      // Search in both username and handle fields
+      // Remove @ prefix from value if present for handle search
+      const searchValue = value.replace(/^@/, ''); // Remove @ if user provided it
+      const escapedValue = searchValue.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // Escape special regex characters
+      
+      // Search in username field
+      searchQuery.$or = [
+        { username: { $regex: `^${escapedValue}`, $options: 'i' } },
+        { handle: { $regex: `^@?${escapedValue}`, $options: 'i' } } // Match with or without @ prefix
+      ];
     } else if (type === 'email') {
       searchQuery.email = { $regex: `^${value}`, $options: 'i' };
     } else if (type === 'phone') {
@@ -40,7 +49,7 @@ exports.searchUsers = async (req, res) => {
 
     // Search users and return safe fields only
     const users = await User.find(searchQuery)
-      .select('_id fullName username profileImage friends')
+      .select('_id fullName username handle profileImage friends')
       .limit(20);
 
     // Get current user's friends list and friend requests
@@ -101,6 +110,7 @@ exports.searchUsers = async (req, res) => {
         _id: user._id,
         fullName: user.fullName,
         username: user.username,
+        handle: user.handle || user.username, // Fallback to username if handle doesn't exist
         profileImage: user.profileImage,
         friendshipStatus,
         friendRequestId,
@@ -196,7 +206,7 @@ exports.getUserProfile = async (req, res) => {
     const { id } = req.params;
 
     const user = await User.findById(id)
-      .select('_id fullName username profileImage friends createdAt');
+      .select('_id fullName username handle profileImage friends createdAt');
 
     if (!user) {
       return res.status(404).json({
@@ -218,6 +228,7 @@ exports.getUserProfile = async (req, res) => {
         _id: user._id,
         fullName: user.fullName,
         username: user.username,
+        handle: user.handle || user.username, // Fallback to username if handle doesn't exist
         profileImage: user.profileImage,
         friendsCount: user.friends.length,
         wishlistCount,

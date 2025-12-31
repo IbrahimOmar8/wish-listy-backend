@@ -1,6 +1,7 @@
 const User = require('../models/User');
 const { generateToken } = require('../utils/jwt');
 const bcrypt = require('bcryptjs');
+const { generateUniqueHandle } = require('../utils/handleGenerator');
 
 exports.sendPasswordResetLink = async (req, res) => {
   // Logic to send password reset link (if needed)
@@ -117,10 +118,22 @@ exports.register = async (req, res) => {
     // Hash password before saving
     const hashedPassword = await bcrypt.hash(password, 10);
 
+    // Generate unique handle from fullName
+    let generatedHandle;
+    try {
+      generatedHandle = await generateUniqueHandle(fullName);
+      console.log(`Generated handle for new user: ${generatedHandle}`);
+    } catch (handleError) {
+      console.error('Error generating handle:', handleError);
+      // Continue without handle - it can be generated later via migration
+      generatedHandle = null;
+    }
+
     // Create new user
     const user = await User.create({
       fullName: fullName.trim(),
       username: username.toLowerCase().trim(),
+      handle: generatedHandle,
       password: hashedPassword,
       isVerified: true
     });
@@ -133,7 +146,8 @@ exports.register = async (req, res) => {
       user: {
         id: user._id,
         fullName: user.fullName,
-        username: user.username
+        username: user.username,
+        handle: user.handle
       }
     });
   } catch (error) {

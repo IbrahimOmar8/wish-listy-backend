@@ -265,7 +265,7 @@ exports.getMyFriends = async (req, res) => {
     const friends = await User.find({
       _id: { $in: currentUser.friends }
     })
-      .select('_id fullName username profileImage')
+      .select('_id fullName username handle profileImage')
       .sort({ fullName: 1 }) // Sort alphabetically by name
       .skip(skip)
       .limit(parseInt(limit));
@@ -297,6 +297,7 @@ exports.getMyFriends = async (req, res) => {
       _id: friend._id,
       fullName: friend.fullName,
       username: friend.username,
+      handle: friend.handle || friend.username, // Fallback to username if handle doesn't exist
       profileImage: friend.profileImage,
       wishlistCount: wishlistCountMap.get(friend._id.toString()) || 0
     }));

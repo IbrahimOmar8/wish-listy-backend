@@ -17,6 +17,17 @@ const userSchema = new mongoose.Schema({
     match: [ /^[a-zA-Z0-9_.@\-]+$/, 'Username can only contain letters, numbers, underscores, hyphens, dots, and @ symbol'
 ]
   },
+  handle: {
+    type: String,
+    unique: true,
+    sparse: true,
+    trim: true,
+    lowercase: true,
+    minlength: [4, 'Handle must be at least 4 characters long (including @)'],
+    maxlength: [31, 'Handle cannot exceed 31 characters (including @)'],
+    match: [/^@[a-zA-Z0-9_.]+$/, 'Handle must start with @ and contain only letters, numbers, underscores, and dots'],
+    default: null
+  },
   email: {
     type: String,
     trim: true,

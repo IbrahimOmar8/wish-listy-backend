@@ -9,7 +9,8 @@
     "dev": "nodemon server.js",
     "build": "npm install --omit=dev",
     "seed": "node scripts/seed.js",
-    "migrate:invitations": "node scripts/migrate-event-invitations.js"
+    "migrate:invitations": "node scripts/migrate-event-invitations.js",
+    "migrate:handles": "node scripts/migrate_handles.js"
   },
   "engines": {
     "node": ">=18.0.0",
