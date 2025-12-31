@@ -43,10 +43,7 @@ const eventSchema = new mongoose.Schema({
   type: {
     type: String,
     required: [true, 'Event type is required'],
-    enum: {
-      values: ['birthday', 'wedding', 'anniversary', 'graduation', 'holiday', 'baby_shower', 'house_warming', 'other'],
-      message: 'Invalid event type'
-    }
+    trim: true
   },
   status: {
     type: String,

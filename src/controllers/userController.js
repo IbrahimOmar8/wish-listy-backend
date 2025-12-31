@@ -2,6 +2,8 @@ const User = require('../models/User');
 const FriendRequest = require('../models/FriendRequest');
 const Wishlist = require('../models/Wishlist');
 const Event = require('../models/Event');
+const { translateInterests } = require('../utils/interestsTranslator');
+const { isValidCountryCode, isValidDateFormat, isNotFutureDate } = require('../utils/validators');
 
 // Search users by username, email, or phone
 exports.searchUsers = async (req, res) => {
@@ -183,11 +185,15 @@ exports.updateUserInterests = async (req, res) => {
       });
     }
 
+    // Translate interests based on user's preferred language
+    const userLanguage = user.preferredLanguage || 'en';
+    const translatedInterests = translateInterests(user.interests, userLanguage);
+
     res.status(200).json({
       success: true,
       message: 'Interests updated successfully',
       data: {
-        interests: user.interests
+        interests: translatedInterests
       }
     });
   } catch (error) {
@@ -206,7 +212,7 @@ exports.getUserProfile = async (req, res) => {
     const { id } = req.params;
 
     const user = await User.findById(id)
-      .select('_id fullName username handle profileImage friends createdAt');
+      .select('_id fullName username handle email phone profileImage bio gender birth_date country_code friends interests preferredLanguage createdAt');
 
     if (!user) {
       return res.status(404).json({
@@ -221,6 +227,23 @@ exports.getUserProfile = async (req, res) => {
       Event.countDocuments({ creator: id })
     ]);
 
+    // Translate interests based on user's preferred language (if interests exist)
+    let translatedInterests = [];
+    if (user.interests && Array.isArray(user.interests)) {
+      const userLanguage = user.preferredLanguage || 'en';
+      translatedInterests = translateInterests(user.interests, userLanguage);
+    }
+
+    // Format birth_date to YYYY-MM-DD if exists
+    let formattedBirthDate = null;
+    if (user.birth_date) {
+      const date = new Date(user.birth_date);
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      formattedBirthDate = `${year}-${month}-${day}`;
+    }
+
     // Return profile with friends, wishlist, and events counts
     res.status(200).json({
       success: true,
@@ -229,7 +252,14 @@ exports.getUserProfile = async (req, res) => {
         fullName: user.fullName,
         username: user.username,
         handle: user.handle || user.username, // Fallback to username if handle doesn't exist
+        email: user.email || null,
+        phone: user.phone || null,
         profileImage: user.profileImage,
+        bio: user.bio || null,
+        gender: user.gender || null,
+        birth_date: formattedBirthDate,
+        country_code: user.country_code || null,
+        interests: translatedInterests,
         friendsCount: user.friends.length,
         wishlistCount,
         eventsCount,
@@ -241,6 +271,213 @@ exports.getUserProfile = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error fetching user profile',
+      error: error.message
+    });
+  }
+};
+
+// Update user profile by ID (user can only update their own profile)
+exports.updateUserProfile = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const currentUserId = req.user.id;
+
+    // Check if user is trying to update their own profile
+    if (id !== currentUserId.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: 'You can only update your own profile'
+      });
+    }
+
+    // Handle both camelCase and snake_case from frontend
+    const { 
+      bio, 
+      gender, 
+      birth_date, 
+      birthDate, // camelCase from frontend
+      country_code, 
+      countryCode, // camelCase from frontend
+      fullName,
+      name, // alias from frontend
+      email, 
+      phone 
+    } = req.body;
+
+    // Normalize field names (support both camelCase and snake_case)
+    const normalizedBirthDate = birth_date || birthDate;
+    const normalizedCountryCode = country_code || countryCode;
+    const normalizedFullName = fullName || name;
+
+    // Build update object with only provided fields
+    const updateData = {};
+
+    // Validate and update fullName
+    if (normalizedFullName !== undefined) {
+      if (typeof normalizedFullName !== 'string' || normalizedFullName.trim().length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: req.t('auth.fullname_required')
+        });
+      }
+      updateData.fullName = normalizedFullName.trim();
+    }
+
+    // Validate and update email
+    if (email !== undefined) {
+      if (email && typeof email === 'string' && email.trim().length > 0) {
+        const emailRegex = /^\S+@\S+\.\S+$/;
+        if (!emailRegex.test(email.trim())) {
+          return res.status(400).json({
+            success: false,
+            message: req.t('validation.invalid_format')
+          });
+        }
+        updateData.email = email.trim().toLowerCase();
+      } else {
+        updateData.email = null;
+      }
+    }
+
+    // Validate and update phone
+    if (phone !== undefined) {
+      updateData.phone = phone ? phone.trim() : null;
+    }
+
+    // Validate and update bio
+    if (bio !== undefined) {
+      if (bio && typeof bio === 'string') {
+        if (bio.trim().length > 500) {
+          return res.status(400).json({
+            success: false,
+            message: req.t('validation.max_length')
+          });
+        }
+        updateData.bio = bio.trim() || null;
+      } else {
+        updateData.bio = null;
+      }
+    }
+
+    // Validate and update gender
+    if (gender !== undefined) {
+      if (gender === null || gender === '') {
+        updateData.gender = null;
+      } else if (!['male', 'female'].includes(gender)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Gender must be either "male" or "female"'
+        });
+      } else {
+        updateData.gender = gender;
+      }
+    }
+
+    // Validate and update birth_date
+    if (normalizedBirthDate !== undefined) {
+      if (normalizedBirthDate === null || normalizedBirthDate === '') {
+        updateData.birth_date = null;
+      } else {
+        // Handle ISO 8601 date string from frontend
+        let dateString = normalizedBirthDate;
+        if (dateString.includes('T')) {
+          // Extract date part from ISO 8601 string (YYYY-MM-DDTHH:mm:ss.sssZ)
+          dateString = dateString.split('T')[0];
+        }
+
+        if (!isValidDateFormat(dateString)) {
+          return res.status(400).json({
+            success: false,
+            message: 'Birth date must be in YYYY-MM-DD format'
+          });
+        }
+        if (!isNotFutureDate(dateString)) {
+          return res.status(400).json({
+            success: false,
+            message: 'Birth date cannot be in the future'
+          });
+        }
+        // Convert YYYY-MM-DD to Date object
+        updateData.birth_date = new Date(dateString + 'T00:00:00.000Z');
+      }
+    }
+
+    // Validate and update country_code
+    if (normalizedCountryCode !== undefined) {
+      if (normalizedCountryCode === null || normalizedCountryCode === '') {
+        updateData.country_code = null;
+      } else {
+        const upperCode = typeof normalizedCountryCode === 'string' ? normalizedCountryCode.trim().toUpperCase() : normalizedCountryCode;
+        if (!isValidCountryCode(upperCode)) {
+          return res.status(400).json({
+            success: false,
+            message: 'Country code must be a valid ISO 3166-1 alpha-2 code (2 uppercase letters, e.g., EG, SA, US)'
+          });
+        }
+        updateData.country_code = upperCode;
+      }
+    }
+
+    // Update user
+    const updatedUser = await User.findByIdAndUpdate(
+      id,
+      updateData,
+      { new: true, runValidators: true }
+    ).select('_id fullName username handle email phone profileImage bio gender birth_date country_code interests preferredLanguage createdAt updatedAt');
+
+    if (!updatedUser) {
+      return res.status(404).json({
+        success: false,
+        message: req.t('user.not_found')
+      });
+    }
+
+    // Format response
+    let userData = updatedUser.toObject();
+    
+    // Translate interests
+    if (userData.interests && Array.isArray(userData.interests)) {
+      const userLanguage = userData.preferredLanguage || 'en';
+      userData.interests = translateInterests(userData.interests, userLanguage);
+    }
+
+    // Format birth_date to YYYY-MM-DD if exists
+    if (userData.birth_date) {
+      const date = new Date(userData.birth_date);
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      userData.birth_date = `${year}-${month}-${day}`;
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Profile updated successfully',
+      data: userData
+    });
+  } catch (error) {
+    console.error('Update user profile error:', error);
+    
+    // Handle Mongoose validation errors
+    if (error.name === 'ValidationError') {
+      const messages = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({
+        success: false,
+        message: messages.join(', ')
+      });
+    }
+
+    // Handle duplicate key error
+    if (error.code === 11000) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email or username already exists'
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: req.t('common.server_error'),
       error: error.message
     });
   }

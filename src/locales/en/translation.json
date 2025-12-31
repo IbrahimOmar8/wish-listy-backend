@@ -80,5 +80,25 @@
     "item_unreserved": "A gift in your wishlist is available again",
     "item_purchased": "Congratulations! A gift has been purchased for you! 🎉",
     "item_received": "{{senderName}} received your gift '{{itemName}}'! 🎁"
+  },
+  "interests": {
+    "Watches": "Watches",
+    "Perfumes": "Perfumes",
+    "Sneakers": "Sneakers",
+    "Jewelry": "Jewelry",
+    "Handbags": "Handbags",
+    "Makeup & Skincare": "Makeup & Skincare",
+    "Gadgets": "Gadgets",
+    "Gaming": "Gaming",
+    "Photography": "Photography",
+    "Home Decor": "Home Decor",
+    "Plants": "Plants",
+    "Coffee & Tea": "Coffee & Tea",
+    "Books": "Books",
+    "Fitness Gear": "Fitness Gear",
+    "Car Accessories": "Car Accessories",
+    "Music Instruments": "Music Instruments",
+    "Art": "Art",
+    "DIY & Crafts": "DIY & Crafts"
   }
 }

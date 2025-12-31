@@ -48,6 +48,40 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: null
   },
+  bio: {
+    type: String,
+    trim: true,
+    maxlength: [500, 'Bio cannot exceed 500 characters'],
+    default: null
+  },
+  gender: {
+    type: String,
+    enum: ['male', 'female'],
+    default: null
+  },
+  birth_date: {
+    type: Date,
+    default: null,
+    validate: {
+      validator: function(value) {
+        // If provided, must be a valid date and not in the future
+        if (!value) return true; // Optional field
+        const date = new Date(value);
+        if (isNaN(date.getTime())) return false;
+        return date <= new Date(); // Birth date cannot be in the future
+      },
+      message: 'Birth date must be a valid date and cannot be in the future'
+    }
+  },
+  country_code: {
+    type: String,
+    trim: true,
+    uppercase: true,
+    minlength: [2, 'Country code must be 2 letters'],
+    maxlength: [2, 'Country code must be 2 letters'],
+    match: [/^[A-Z]{2}$/, 'Country code must be a valid ISO 3166-1 alpha-2 code (2 uppercase letters)'],
+    default: null
+  },
   isVerified: {
     type: Boolean,
     default: false

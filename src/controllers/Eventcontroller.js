@@ -237,13 +237,8 @@ exports.createEvent = async (req, res) => {
       }
     }
 
-    if (!type) {
+    if (!type || typeof type !== 'string' || type.trim().length === 0) {
       errors.type = req.t('validation.val_event_type_required');
-    } else {
-      const validTypes = ['birthday', 'wedding', 'anniversary', 'graduation', 'holiday', 'baby_shower', 'house_warming', 'other'];
-      if (!validTypes.includes(type)) {
-        errors.type = req.t('validation.val_event_type_invalid', { types: validTypes.join(', ') });
-      }
     }
 
     if (!privacy) {
