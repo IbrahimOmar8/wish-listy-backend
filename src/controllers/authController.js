@@ -1,4 +1,13 @@
 const User = require('../models/User');
+const Wishlist = require('../models/Wishlist');
+const Item = require('../models/Item');
+const FriendRequest = require('../models/FriendRequest');
+const Notification = require('../models/Notification');
+const Reservation = require('../models/Reservation');
+const Event = require('../models/Event');
+const EventInvitation = require('../models/Eventinvitation');
+const OTP = require('../models/OTP');
+const mongoose = require('mongoose');
 const { generateToken } = require('../utils/jwt');
 const bcrypt = require('bcryptjs');
 const { generateUniqueHandle } = require('../utils/handleGenerator');
@@ -442,6 +451,179 @@ exports.logout = async (req, res) => {
     res.status(500).json({
       success: false,
       message: req.t('auth.logout_failed'),
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Service function: Cascading deletion of user account and all associated data
+ * Uses MongoDB transactions to ensure atomicity
+ */
+const deleteUserAccount = async (userId) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    // Step 0: Get user data before deletion (for profile image and phone cleanup if needed)
+    const user = await User.findById(userId).select('profileImage phone').session(session);
+    const profileImageUrl = user?.profileImage;
+    const userPhone = user?.phone;
+
+    // Step 1: Get user's wishlists to delete items later
+    const userWishlists = await Wishlist.find({ owner: userId }).select('_id').session(session);
+    const wishlistIds = userWishlists.map(w => w._id);
+
+    // Step 2: Delete all Reservations where user is the reserver
+    await Reservation.deleteMany({ reserver: userId }).session(session);
+
+    // Step 3: Delete all Items in user's wishlists
+    if (wishlistIds.length > 0) {
+      await Item.deleteMany({ wishlist: { $in: wishlistIds } }).session(session);
+    }
+
+    // Step 4: Delete all Items where user is the purchaser
+    await Item.updateMany(
+      { purchasedBy: userId },
+      { $unset: { purchasedBy: 1, purchasedAt: 1 } },
+      { session }
+    );
+
+    // Step 5: Delete all Wishlists owned by the user
+    await Wishlist.deleteMany({ owner: userId }).session(session);
+
+    // Step 6: Remove user from all shared wishlists
+    await Wishlist.updateMany(
+      { sharedWith: userId },
+      { $pull: { sharedWith: userId } },
+      { session }
+    );
+
+    // Step 7: Delete all FriendRequests where user is sender or receiver
+    await FriendRequest.deleteMany({
+      $or: [{ from: userId }, { to: userId }]
+    }).session(session);
+
+    // Step 8: Remove user from all other users' friends arrays
+    await User.updateMany(
+      { friends: userId },
+      { $pull: { friends: userId } },
+      { session }
+    );
+
+    // Step 9: Delete all Events created by the user
+    const userEvents = await Event.find({ creator: userId }).select('_id').session(session);
+    const eventIds = userEvents.map(e => e._id);
+
+    // Delete event invitations for user's events
+    if (eventIds.length > 0) {
+      await EventInvitation.deleteMany({ event: { $in: eventIds } }).session(session);
+    }
+
+    // Delete the events themselves
+    await Event.deleteMany({ creator: userId }).session(session);
+
+    // Step 10: Delete all EventInvitations where user is invitee or inviter
+    await EventInvitation.deleteMany({
+      $or: [{ invitee: userId }, { inviter: userId }]
+    }).session(session);
+
+    // Step 11: Remove user from event invited_friends arrays
+    await Event.updateMany(
+      { 'invited_friends.user': userId },
+      { $pull: { invited_friends: { user: userId } } },
+      { session }
+    );
+
+    // Step 12: Delete all Notifications where user is the recipient or related user
+    await Notification.deleteMany({
+      $or: [{ user: userId }, { relatedUser: userId }]
+    }).session(session);
+
+    // Step 13: Delete OTP records associated with user's phone (if any)
+    // Note: OTPs auto-expire, but we clean them up for completeness
+    if (userPhone) {
+      await OTP.deleteMany({ phoneNumber: userPhone }).session(session);
+    }
+
+    // Step 14: Delete profile images from storage (if applicable)
+    // Note: This is a placeholder. Implement actual file deletion if using
+    // AWS S3, Firebase Storage, or other cloud storage services.
+    // Example:
+    // if (profileImageUrl) {
+    //   await deleteFileFromStorage(profileImageUrl);
+    // }
+    // For now, profile images stored as URLs will be orphaned.
+    // Implement cloud storage deletion if you're using S3/Firebase/etc.
+
+    // Step 15: Finally, delete the User record
+    await User.findByIdAndDelete(userId).session(session);
+
+    // Commit the transaction
+    await session.commitTransaction();
+    session.endSession();
+
+    return { success: true };
+  } catch (error) {
+    // Rollback the transaction on error
+    await session.abortTransaction();
+    session.endSession();
+    throw error;
+  }
+};
+
+/**
+ * Delete Account API
+ * DELETE /api/auth/delete-account
+ * 
+ * Permanently deletes the authenticated user's account and all associated data.
+ * Uses JWT token to extract userId (prevents IDOR attacks).
+ * Implements cascading deletion with database transactions for atomicity.
+ */
+exports.deleteAccount = async (req, res) => {
+  try {
+    // Security: Extract userId from JWT token (req.user.id), not from request body
+    // This prevents IDOR (Insecure Direct Object Reference) attacks
+    const userId = req.user.id;
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Unauthorized: Invalid authentication token'
+      });
+    }
+
+    // Verify user exists before attempting deletion
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Perform cascading deletion with transaction support
+    await deleteUserAccount(userId);
+
+    res.status(200).json({
+      success: true,
+      message: 'Account deleted successfully. All associated data has been permanently removed.'
+    });
+  } catch (error) {
+    console.error('Delete account error:', error);
+    
+    // Handle transaction errors
+    if (error.name === 'TransactionError' || error.message.includes('transaction')) {
+      return res.status(500).json({
+        success: false,
+        message: 'Error deleting account. Transaction failed. Please try again.',
+        error: error.message
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: 'Error deleting account. Please try again later.',
       error: error.message
     });
   }

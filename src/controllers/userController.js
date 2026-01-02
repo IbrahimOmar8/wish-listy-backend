@@ -210,6 +210,7 @@ exports.updateUserInterests = async (req, res) => {
 exports.getUserProfile = async (req, res) => {
   try {
     const { id } = req.params;
+    const currentUserId = req.user.id; // Authenticated user ID
 
     const user = await User.findById(id)
       .select('_id fullName username handle email phone profileImage bio gender birth_date country_code friends interests preferredLanguage createdAt');
@@ -226,6 +227,59 @@ exports.getUserProfile = async (req, res) => {
       Wishlist.countDocuments({ owner: id }),
       Event.countDocuments({ creator: id })
     ]);
+
+    // Get relationship information between authenticated user and target user
+    let relationship = {
+      status: 'none',
+      isFriend: false,
+      incomingRequest: { exists: false, requestId: null },
+      outgoingRequest: { exists: false, requestId: null }
+    };
+
+    // Only check relationship if viewing another user's profile (not own profile)
+    if (currentUserId.toString() !== id.toString()) {
+      // Check if users are friends
+      const currentUser = await User.findById(currentUserId).select('friends');
+      const isFriend = currentUser.friends.some(
+        friendId => friendId.toString() === id.toString()
+      );
+
+      if (isFriend) {
+        relationship.status = 'friends';
+        relationship.isFriend = true;
+      } else {
+        // Check for pending friend requests
+        const incomingRequest = await FriendRequest.findOne({
+          from: id, // Target user sent request to current user
+          to: currentUserId,
+          status: 'pending'
+        });
+
+        const outgoingRequest = await FriendRequest.findOne({
+          from: currentUserId, // Current user sent request to target user
+          to: id,
+          status: 'pending'
+        });
+
+        if (incomingRequest) {
+          relationship.status = 'incoming_request';
+          relationship.incomingRequest = {
+            exists: true,
+            requestId: incomingRequest._id.toString()
+          };
+        } else if (outgoingRequest) {
+          relationship.status = 'outgoing_request';
+          relationship.outgoingRequest = {
+            exists: true,
+            requestId: outgoingRequest._id.toString()
+          };
+        }
+      }
+    } else {
+      // Viewing own profile - set as friends (self)
+      relationship.status = 'friends';
+      relationship.isFriend = true;
+    }
 
     // Translate interests based on user's preferred language (if interests exist)
     let translatedInterests = [];
@@ -244,7 +298,7 @@ exports.getUserProfile = async (req, res) => {
       formattedBirthDate = `${year}-${month}-${day}`;
     }
 
-    // Return profile with friends, wishlist, and events counts
+    // Return profile with friends, wishlist, and events counts, plus relationship info
     res.status(200).json({
       success: true,
       data: {
@@ -263,7 +317,8 @@ exports.getUserProfile = async (req, res) => {
         friendsCount: user.friends.length,
         wishlistCount,
         eventsCount,
-        createdAt: user.createdAt
+        createdAt: user.createdAt,
+        relationship
       }
     });
   } catch (error) {

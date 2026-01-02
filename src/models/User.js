@@ -56,8 +56,15 @@ const userSchema = new mongoose.Schema({
   },
   gender: {
     type: String,
-    enum: ['male', 'female'],
-    default: null
+    default: null,
+    validate: {
+      validator: function(value) {
+        // Optional field: allow null/undefined, otherwise must be one of the allowed values
+        if (value === null || value === undefined) return true;
+        return ['male', 'female'].includes(value);
+      },
+      message: '{VALUE} is not a valid gender value'
+    }
   },
   birth_date: {
     type: Date,

@@ -70,16 +70,18 @@ exports.sendFriendRequest = async (req, res) => {
     await friendRequest.populate('to', '_id fullName username profileImage');
 
     // Create notification for the receiver with dynamic localization
+    // Note: relatedId (friendRequest._id) will be available as data.relatedId (requestId)
+    //       and senderId (fromUserId) will be available as data.relatedUser._id (senderId)
     await createNotification({
       recipientId: toUserId,
-      senderId: fromUserId,
+      senderId: fromUserId, // This becomes data.relatedUser._id (senderId) in notification
       type: 'friend_request',
       title: 'New Friend Request',
       messageKey: 'notif.friend_request',
       messageVariables: {
         senderName: friendRequest.from.fullName
       },
-      relatedId: friendRequest._id,
+      relatedId: friendRequest._id, // This becomes data.relatedId (requestId) in notification
       emitSocketEvent: true,
       socketIo: req.app.get('io')
     });
@@ -380,6 +382,97 @@ exports.getFriendSuggestions = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error fetching friend suggestions',
+      error: error.message
+    });
+  }
+};
+
+// Remove friend (Unfriend)
+exports.removeFriend = async (req, res) => {
+  try {
+    const { friendId } = req.params;
+    const currentUserId = req.user.id;
+
+    // Validation: Check if friendId is provided
+    if (!friendId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Friend ID is required'
+      });
+    }
+
+    // Validation: Cannot unfriend yourself
+    if (currentUserId === friendId) {
+      return res.status(400).json({
+        success: false,
+        message: 'You cannot unfriend yourself'
+      });
+    }
+
+    // Check if friend exists
+    const friend = await User.findById(friendId);
+    if (!friend) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Get current user to check friendship
+    const currentUser = await User.findById(currentUserId).select('friends');
+    if (!currentUser) {
+      return res.status(404).json({
+        success: false,
+        message: 'Current user not found'
+      });
+    }
+
+    // Check if friendship exists
+    const friendIdString = friendId.toString();
+    const isFriend = currentUser.friends.some(
+      friend => friend.toString() === friendIdString
+    );
+
+    if (!isFriend) {
+      return res.status(400).json({
+        success: false,
+        message: 'You are not friends with this user'
+      });
+    }
+
+    // Remove friend from both users' friends arrays (bidirectional removal)
+    await User.findByIdAndUpdate(
+      currentUserId,
+      { $pull: { friends: friendId } }
+    );
+
+    await User.findByIdAndUpdate(
+      friendId,
+      { $pull: { friends: currentUserId } }
+    );
+
+    // Update any accepted friend requests between these users to 'rejected'
+    // This ensures data consistency - if they were friends, any accepted request should be marked as ended
+    await FriendRequest.updateMany(
+      {
+        $or: [
+          { from: currentUserId, to: friendId },
+          { from: friendId, to: currentUserId }
+        ],
+        status: 'accepted'
+      },
+      { status: 'rejected' }
+    );
+
+    res.status(200).json({
+      success: true,
+      message: 'Friend removed successfully'
+    });
+  } catch (error) {
+    console.error('Remove friend error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error removing friend',
       error: error.message
     });
   }

@@ -6,7 +6,8 @@ const {
   getFriendRequests,
   respondToFriendRequest,
   getFriendSuggestions,
-  getMyFriends
+  getMyFriends,
+  removeFriend
 } = require('../controllers/friendController');
 
 // Send friend request
@@ -23,5 +24,8 @@ router.post('/request/:id/respond', protect, respondToFriendRequest);
 
 // Get friend suggestions (people you may know)
 router.get('/suggestions', protect, getFriendSuggestions);
+
+// Remove friend (Unfriend) - Must be after specific routes like /suggestions
+router.delete('/:friendId', protect, removeFriend);
 
 module.exports = router;
