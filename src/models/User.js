@@ -97,6 +97,17 @@ const userSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
   }],
+  dismissedSuggestions: [{
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true
+    },
+    dismissedAt: {
+      type: Date,
+      default: Date.now
+    }
+  }],
   interests: [{
     type: String,
     enum: [

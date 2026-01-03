@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const FriendRequest = require('../models/FriendRequest');
 const User = require('../models/User');
 const Notification = require('../models/Notification');
@@ -322,16 +323,27 @@ exports.getMyFriends = async (req, res) => {
   }
 };
 
-// Get friend suggestions (people you may know)
+// Get friend suggestions (people you may know) - Optimized with Aggregation Pipeline
 exports.getFriendSuggestions = async (req, res) => {
   try {
     const userId = req.user.id;
 
-    // Get current user with friends
-    const currentUser = await User.findById(userId).select('friends');
-    const userFriends = currentUser.friends.map(f => f.toString());
+    // Step 1: Get current user's friends and dismissed suggestions
+    const currentUser = await User.findById(userId)
+      .select('friends dismissedSuggestions');
+    
+    if (!currentUser) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
 
-    // Get all pending/accepted requests involving the user
+    const userFriends = currentUser.friends.map(f => f.toString());
+    const userFriendsObjIds = currentUser.friends.map(f => new mongoose.Types.ObjectId(f));
+    const dismissedUserIds = currentUser.dismissedSuggestions?.map(d => d.userId.toString()) || [];
+
+    // Step 2: Get all pending/accepted requests involving the user
     const existingRequests = await FriendRequest.find({
       $or: [
         { from: userId },
@@ -340,48 +352,252 @@ exports.getFriendSuggestions = async (req, res) => {
       status: { $in: ['pending', 'accepted'] }
     }).select('from to');
 
-    // Extract user IDs to exclude
-    const excludedUserIds = new Set([userId, ...userFriends]);
+    // Build excluded user IDs set
+    const excludedUserIds = new Set([
+      userId,
+      ...userFriends,
+      ...dismissedUserIds
+    ]);
+    
     existingRequests.forEach(req => {
       excludedUserIds.add(req.from.toString());
       excludedUserIds.add(req.to.toString());
     });
 
-    // Get all users except excluded ones
-    const candidates = await User.find({
-      _id: { $nin: Array.from(excludedUserIds) }
-    }).select('_id fullName username profileImage friends');
+    const excludedIdsArray = Array.from(excludedUserIds).map(id => new mongoose.Types.ObjectId(id));
 
-    // Calculate mutual friends count for each candidate
-    const suggestions = candidates.map(candidate => {
-      const candidateFriends = candidate.friends.map(f => f.toString());
-      const mutualFriendsCount = userFriends.filter(friendId =>
-        candidateFriends.includes(friendId)
-      ).length;
+    // Step 3: Use MongoDB Aggregation Pipeline for efficient mutual friends calculation
+    const suggestions = await User.aggregate([
+      // Stage 1: Filter out excluded users
+      {
+        $match: {
+          _id: { $nin: excludedIdsArray }
+        }
+      },
+      
+      // Stage 2: Project necessary fields
+      {
+        $project: {
+          _id: 1,
+          fullName: 1,
+          username: 1,
+          profileImage: 1,
+          friends: 1
+        }
+      },
+      
+      // Stage 3: Calculate mutual friends count using $setIntersection
+      {
+        $addFields: {
+          mutualFriendsCount: {
+            $size: {
+              $setIntersection: [
+                { $ifNull: ['$friends', []] },
+                userFriendsObjIds
+              ]
+            }
+          }
+        }
+      },
+      
+      // Stage 4: FILTER - Exclude candidates with 0 mutual friends (CRITICAL)
+      // Only keep users who have at least 1 mutual friend
+      {
+        $match: {
+          mutualFriendsCount: { $gt: 0 }
+        }
+      },
+      
+      // Stage 5: Sort by mutual friends count (descending)
+      {
+        $sort: { mutualFriendsCount: -1 }
+      },
+      
+      // Stage 6: Limit to top 50 candidates (of those with mutual friends)
+      {
+        $limit: 50
+      },
+      
+      // Stage 7: Project final fields
+      {
+        $project: {
+          _id: 1,
+          fullName: 1,
+          username: 1,
+          avatar: '$profileImage', // Map profileImage to avatar
+          mutualFriendsCount: 1
+        }
+      }
+    ]);
 
-      return {
-        _id: candidate._id,
-        fullName: candidate.fullName,
-        username: candidate.username,
-        profileImage: candidate.profileImage,
-        mutualFriendsCount
-      };
-    });
-
-    // Sort by mutual friends count (descending) and limit to 20
-    suggestions.sort((a, b) => b.mutualFriendsCount - a.mutualFriendsCount);
-    const topSuggestions = suggestions.slice(0, 20);
+    // Step 4: Randomize - Randomly select 20 from top 50 (if available)
+    // Edge case: If list is empty (new user, no connections), return empty array
+    let finalSuggestions = [];
+    if (suggestions.length > 0) {
+      const shuffled = suggestions.sort(() => Math.random() - 0.5);
+      finalSuggestions = shuffled.slice(0, 20);
+    }
 
     res.status(200).json({
       success: true,
-      count: topSuggestions.length,
-      data: topSuggestions
+      data: finalSuggestions
     });
   } catch (error) {
     console.error('Get friend suggestions error:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching friend suggestions',
+      error: error.message
+    });
+  }
+};
+
+// Dismiss friend suggestion
+exports.dismissSuggestion = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { targetUserId } = req.body;
+
+    // Validation: Check if targetUserId is provided
+    if (!targetUserId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Target user ID is required'
+      });
+    }
+
+    // Validation: Cannot dismiss yourself
+    if (userId === targetUserId) {
+      return res.status(400).json({
+        success: false,
+        message: 'You cannot dismiss yourself'
+      });
+    }
+
+    // Check if target user exists
+    const targetUser = await User.findById(targetUserId);
+    if (!targetUser) {
+      return res.status(404).json({
+        success: false,
+        message: 'Target user not found'
+      });
+    }
+
+    // Get current user
+    const currentUser = await User.findById(userId);
+    if (!currentUser) {
+      return res.status(404).json({
+        success: false,
+        message: 'Current user not found'
+      });
+    }
+
+    // Check if already dismissed
+    const alreadyDismissed = currentUser.dismissedSuggestions?.some(
+      d => d.userId.toString() === targetUserId
+    );
+
+    if (alreadyDismissed) {
+      return res.status(200).json({
+        success: true,
+        message: 'Suggestion already dismissed'
+      });
+    }
+
+    // Add to dismissed suggestions (permanent dismissal)
+    await User.findByIdAndUpdate(
+      userId,
+      {
+        $push: {
+          dismissedSuggestions: {
+            userId: targetUserId,
+            dismissedAt: new Date()
+          }
+        }
+      }
+    );
+
+    res.status(200).json({
+      success: true,
+      message: 'Suggestion dismissed successfully'
+    });
+  } catch (error) {
+    console.error('Dismiss suggestion error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error dismissing suggestion',
+      error: error.message
+    });
+  }
+};
+
+// Cancel friend request (for outgoing requests)
+exports.cancelFriendRequest = async (req, res) => {
+  try {
+    const { requestId } = req.params;
+    const currentUserId = req.user.id;
+
+    // Validation: Check if requestId is provided
+    if (!requestId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Request ID is required'
+      });
+    }
+
+    // Find the friend request
+    const friendRequest = await FriendRequest.findById(requestId);
+
+    if (!friendRequest) {
+      return res.status(404).json({
+        success: false,
+        message: 'Friend request not found'
+      });
+    }
+
+    // Verify that the current user is the sender (only sender can cancel)
+    if (friendRequest.from.toString() !== currentUserId) {
+      return res.status(403).json({
+        success: false,
+        message: 'You can only cancel friend requests that you sent'
+      });
+    }
+
+    // Check if request is still pending (can only cancel pending requests)
+    if (friendRequest.status !== 'pending') {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot cancel a request that has already been ${friendRequest.status}`
+      });
+    }
+
+    // Delete the friend request
+    await FriendRequest.findByIdAndDelete(requestId);
+
+    // Delete related notification if exists
+    await Notification.deleteMany({
+      type: 'friend_request',
+      relatedId: requestId,
+      user: friendRequest.to
+    });
+
+    // Emit socket event to notify the receiver (if connected)
+    if (req.app.get('io')) {
+      req.app.get('io').to(friendRequest.to.toString()).emit('friend_request_cancelled', {
+        requestId: requestId,
+        message: 'Friend request was cancelled'
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Friend request cancelled successfully'
+    });
+  } catch (error) {
+    console.error('Cancel friend request error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error cancelling friend request',
       error: error.message
     });
   }

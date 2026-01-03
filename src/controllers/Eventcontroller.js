@@ -266,9 +266,15 @@ exports.createEvent = async (req, res) => {
 
     // If there are validation errors, return them
     if (Object.keys(errors).length > 0) {
+      // Get the first error message as the main message, or combine all messages
+      const errorMessages = Object.values(errors);
+      const mainMessage = errorMessages.length === 1 
+        ? errorMessages[0] 
+        : errorMessages.join(', ');
+      
       return res.status(400).json({
         success: false,
-        message: req.t('validation.required'),
+        message: mainMessage,
         errors
       });
     }
@@ -431,9 +437,16 @@ exports.createEvent = async (req, res) => {
       Object.keys(error.errors).forEach(key => {
         errors[key] = error.errors[key].message;
       });
+      
+      // Get the first error message as the main message, or combine all messages
+      const errorMessages = Object.values(errors);
+      const mainMessage = errorMessages.length === 1 
+        ? errorMessages[0] 
+        : errorMessages.join(', ');
+      
       return res.status(400).json({
         success: false,
-        message: req.t('validation.required'),
+        message: mainMessage,
         errors
       });
     }
