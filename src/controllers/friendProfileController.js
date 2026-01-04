@@ -203,10 +203,9 @@ exports.getFriendWishlists = async (req, res) => {
  * 
  * Privacy Filtering Logic:
  * 1. If viewer == creator: Return all events (Personal Dashboard)
- * 2. privacy: 'public' -> Show to everyone
- * 3. privacy: 'friends_only' -> Show ONLY if viewer is in creator's friends list
- * 4. If viewer is invited (via EventInvitation) -> Show regardless of privacy setting
- * 5. Exclude: privacy: 'private' AND viewer is NOT invited
+ * 2. If viewer != creator: Return ONLY events where user is explicitly invited (via EventInvitation)
+ *    - Exclude events with invitationStatus: "not_invited"
+ *    - Only return events where user is in the EventInvitation collection
  */
 exports.getFriendEvents = async (req, res) => {
   try {
@@ -297,9 +296,6 @@ exports.getFriendEvents = async (req, res) => {
     }
 
     // Case 2-5: Viewer is NOT the creator - Apply strict privacy filtering
-    // Check friendship status
-    const isFriend = await checkFriendshipStatus(currentUserId, friendUserId);
-
     // Get events where user is explicitly invited (regardless of privacy)
     const invitations = await EventInvitation.find({
       invitee: currentUserId,
@@ -311,17 +307,12 @@ exports.getFriendEvents = async (req, res) => {
       invitationStatusMap[inv.event.toString()] = inv.status;
     });
 
-    // Build privacy query using $or operator with strict filtering
+    // Only return events that the user is explicitly invited to
+    // Filter: Show only events where user is explicitly invited (regardless of privacy setting)
     const privacyQuery = {
       creator: friendUserId,
-      $or: [
-        // Condition 2: privacy: 'public' -> Show to everyone
-        { privacy: 'public' },
-        // Condition 3: privacy: 'friends_only' -> Show ONLY if viewer is in creator's friends list
-        ...(isFriend ? [{ privacy: 'friends_only' }] : []),
-        // Condition 4: Viewer is invited -> Show regardless of privacy setting
-        { _id: { $in: invitedEventIds.map(id => new mongoose.Types.ObjectId(id)) } }
-      ]
+      // Only return events where user is explicitly invited
+      _id: { $in: invitedEventIds.map(id => new mongoose.Types.ObjectId(id)) }
     };
 
     const events = await Event.find(privacyQuery)
@@ -329,12 +320,19 @@ exports.getFriendEvents = async (req, res) => {
       .populate('wishlist', 'name')
       .sort({ date: 1 });
 
+    // Filter: Only return events where user is explicitly invited
+    // All events returned should have invitationStatus (not 'not_invited')
     // Add invitation status, attendees (top 3 accepted), and populate invited_friends with user details
     const eventsWithStatus = await Promise.all(
       events.map(async (event) => {
         const eventObj = event.toObject();
         const invitationStatus =
-          invitationStatusMap[event._id.toString()] || 'not_invited';
+          invitationStatusMap[event._id.toString()];
+
+        // Skip events if invitationStatus is missing or 'not_invited' (shouldn't happen with current query, but extra safety)
+        if (!invitationStatus || invitationStatus === 'not_invited') {
+          return null;
+        }
 
         // Get top 3 accepted attendees (excluding current user for social proof)
         const acceptedAttendees = await EventInvitation.find({
@@ -388,11 +386,14 @@ exports.getFriendEvents = async (req, res) => {
       })
     );
 
+    // Filter out null values (events that were skipped)
+    const filteredEvents = eventsWithStatus.filter(event => event !== null);
+
     return res.status(200).json({
       success: true,
       data: {
-        events: eventsWithStatus,
-        count: eventsWithStatus.length,
+        events: filteredEvents,
+        count: filteredEvents.length,
       },
     });
   } catch (error) {
