@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const User = require('../models/User');
 const Wishlist = require('../models/Wishlist');
 const Event = require('../models/Event');
@@ -199,34 +200,128 @@ exports.getFriendWishlists = async (req, res) => {
 /**
  * Get friend's events based on privacy settings and invitations
  * GET /api/users/:friendUserId/events
+ * 
+ * Privacy Filtering Logic:
+ * 1. If viewer == creator: Return all events (Personal Dashboard)
+ * 2. privacy: 'public' -> Show to everyone
+ * 3. privacy: 'friends_only' -> Show ONLY if viewer is in creator's friends list
+ * 4. If viewer is invited (via EventInvitation) -> Show regardless of privacy setting
+ * 5. Exclude: privacy: 'private' AND viewer is NOT invited
  */
 exports.getFriendEvents = async (req, res) => {
   try {
     const { friendUserId } = req.params;
     const currentUserId = req.user.id;
 
+    // Case 1: If viewer is the creator, return all events (Personal Dashboard)
+    if (currentUserId === friendUserId) {
+      const allEvents = await Event.find({ creator: friendUserId })
+        .populate('creator', 'fullName username profileImage')
+        .populate('wishlist', 'name')
+        .sort({ date: 1 });
+
+      // Get invitations for invitation status
+      const invitations = await EventInvitation.find({
+        invitee: currentUserId,
+      }).select('event status');
+
+      const invitationStatusMap = {};
+      invitations.forEach((inv) => {
+        invitationStatusMap[inv.event.toString()] = inv.status;
+      });
+
+      // Process events with invitation status and other metadata
+      const eventsWithStatus = await Promise.all(
+        allEvents.map(async (event) => {
+          const eventObj = event.toObject();
+          const invitationStatus =
+            invitationStatusMap[event._id.toString()] || 'not_invited';
+
+          // Get top 3 accepted attendees
+          const acceptedAttendees = await EventInvitation.find({
+            event: event._id,
+            status: { $in: ['accepted', 'maybe'] },
+            invitee: { $ne: currentUserId }
+          })
+            .populate('invitee', 'fullName username profileImage')
+            .sort({ updatedAt: -1 })
+            .limit(3);
+
+          // Get all invited friends from EventInvitation
+          const allInvitations = await EventInvitation.find({ event: event._id })
+            .select('invitee status updatedAt')
+            .populate('invitee', '_id fullName username profileImage')
+            .sort({ createdAt: 1 });
+
+          const transformedInvitedFriends = allInvitations.map((invitation) => {
+            const invitee = invitation.invitee;
+            return {
+              user: invitee ? {
+                _id: invitee._id,
+                fullName: invitee.fullName,
+                username: invitee.username,
+                profileImage: invitee.profileImage
+              } : null,
+              status: invitation.status || 'pending',
+              updatedAt: invitation.updatedAt || invitation.createdAt || new Date()
+            };
+          });
+
+          // Compute status dynamically
+          const eventDate = new Date(event.date);
+          const now = new Date();
+          const computedStatus = eventDate < now ? 'past' : 'upcoming';
+
+          return {
+            ...eventObj,
+            status: computedStatus,
+            invitationStatus,
+            invited_friends: transformedInvitedFriends,
+            attendees: acceptedAttendees.map(inv => ({
+              _id: inv.invitee._id,
+              fullName: inv.invitee.fullName,
+              username: inv.invitee.username,
+              profileImage: inv.invitee.profileImage
+            }))
+          };
+        })
+      );
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          events: eventsWithStatus,
+          count: eventsWithStatus.length,
+        },
+      });
+    }
+
+    // Case 2-5: Viewer is NOT the creator - Apply strict privacy filtering
     // Check friendship status
     const isFriend = await checkFriendshipStatus(currentUserId, friendUserId);
 
-    // Get events where user is explicitly invited
+    // Get events where user is explicitly invited (regardless of privacy)
     const invitations = await EventInvitation.find({
       invitee: currentUserId,
     }).select('event status');
 
-    const invitedEventIds = invitations.map((inv) => inv.event);
+    const invitedEventIds = invitations.map((inv) => inv.event.toString());
     const invitationStatusMap = {};
     invitations.forEach((inv) => {
       invitationStatusMap[inv.event.toString()] = inv.status;
     });
 
-    // Build query based on privacy rules
+    // Build privacy query using $or operator with strict filtering
     const privacyQuery = {
       creator: friendUserId,
       $or: [
+        // Condition 2: privacy: 'public' -> Show to everyone
         { privacy: 'public' },
+        // Condition 3: privacy: 'friends_only' -> Show ONLY if viewer is in creator's friends list
         ...(isFriend ? [{ privacy: 'friends_only' }] : []),
-        { _id: { $in: invitedEventIds }, privacy: 'private' },
-      ],
+        // Condition 4: Viewer is invited -> Show regardless of privacy setting
+        { _id: { $in: invitedEventIds.map(id => new mongoose.Types.ObjectId(id)) } }
+      ]
     };
 
     const events = await Event.find(privacyQuery)
