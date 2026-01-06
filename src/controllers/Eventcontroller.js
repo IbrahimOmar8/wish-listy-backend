@@ -528,6 +528,13 @@ exports.getMyEvents = async (req, res) => {
             };
           });
         }
+        
+        // Compute status dynamically based on event date vs current time
+        const eventDate = new Date(eventObj.date);
+        const now = new Date();
+        const computedStatus = eventDate < now ? 'past' : 'upcoming';
+        eventObj.status = computedStatus; // Override static status with computed dynamic status
+        
         return eventObj;
       })
     );
@@ -562,6 +569,12 @@ exports.getMyEvents = async (req, res) => {
         } else {
           eventObj.invited_friends = [];
         }
+        
+        // Compute status dynamically based on event date vs current time
+        const eventDate = new Date(eventObj.date);
+        const now = new Date();
+        const computedStatus = eventDate < now ? 'past' : 'upcoming';
+        eventObj.status = computedStatus; // Override static status with computed dynamic status
         
         return eventObj;
       })
