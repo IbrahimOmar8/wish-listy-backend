@@ -2,7 +2,7 @@
   "name": "wish-listy",
   "version": "1.0.0",
   "description": "Wishlist Management API with Phone Authentication",
-  "main": "src/server.js",
+  "main": "server.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node server.js",
