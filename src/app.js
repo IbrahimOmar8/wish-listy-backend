@@ -15,6 +15,7 @@ const notificationRoutes = require('./routes/notificationRoutes');
 const reservationRoutes = require('./routes/reservationRoutes');
 const dashboardRoutes = require('./routes/dashboardRoutes');
 const activityRoutes = require('./routes/activityRoutes');
+const uploadRoutes = require('./routes/uploadRoutes');
 
 const app = express();
 
@@ -83,7 +84,8 @@ app.get('/', (req, res) => {
       notifications: '/api/notifications',
       reservations: '/api/reservations',
       dashboard: '/api/dashboard',
-      activities: '/api/activities'
+      activities: '/api/activities',
+      upload: '/api/upload'
     }
   });
 });
@@ -98,6 +100,7 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api', reservationRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/activities', activityRoutes);
+app.use('/api/upload', uploadRoutes);
 
 // Error Handler
 app.use(errorHandler);
