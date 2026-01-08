@@ -126,6 +126,11 @@ const userSchema = new mongoose.Schema({
     type: Date,
     default: null
   },
+  fcmToken: {
+    type: String,
+    default: null,
+    trim: true
+  },
   createdAt: {
     type: Date,
     default: Date.now

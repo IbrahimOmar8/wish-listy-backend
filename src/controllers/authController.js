@@ -20,7 +20,7 @@ exports.sendPasswordResetLink = async (req, res) => {
 
 exports.verifyPasswordAndLogin = async (req, res) => {
   try {
-    const { username, password } = req.body;
+    const { username, password, fcmToken } = req.body;
 
     if (!username || !password) {
       return res.status(400).json({
@@ -47,6 +47,11 @@ exports.verifyPasswordAndLogin = async (req, res) => {
         success: false,
         message: req.t('auth.invalid_password')
       });
+    }
+
+    // Update FCM token if provided (before generating token to ensure it's saved)
+    if (fcmToken) {
+      await User.findByIdAndUpdate(user._id, { fcmToken });
     }
 
     const token = generateToken(user._id);
