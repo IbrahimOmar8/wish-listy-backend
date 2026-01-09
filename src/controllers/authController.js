@@ -18,6 +18,67 @@ exports.sendPasswordResetLink = async (req, res) => {
   // Logic to send password reset link (if needed)
 };
 
+/**
+ * Check Account API
+ * POST /api/auth/check-account
+ * 
+ * Checks if a user account exists by username (which can be email or phone).
+ * Note: In this system, username field stores either email or phone,
+ * similar to login/register endpoints.
+ * 
+ * Returns the email if the user has one in the email field, 
+ * otherwise returns email_linked: false
+ */
+exports.checkAccount = async (req, res) => {
+  try {
+    const { username } = req.body;
+
+    // Validate that username is provided
+    if (!username) {
+      return res.status(400).json({
+        success: false,
+        message: 'Username is required'
+      });
+    }
+
+    // Search in username field (username can be email or phone)
+    // Normalize: lowercase and trim (same as login/register)
+    const searchValue = username.toLowerCase().trim();
+    
+    // Find user by username (exact match, same as login)
+    const user = await User.findOne({ 
+      username: searchValue
+    }).select('username email');
+
+    // If user not found
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Check if user has email in the email field
+    if (user.email) {
+      return res.status(200).json({
+        success: true,
+        email: user.email
+      });
+    } else {
+      return res.status(200).json({
+        success: true,
+        email_linked: false
+      });
+    }
+  } catch (error) {
+    console.error('Check Account Error:', error);
+    res.status(500).json({
+      success: false,
+      message: req.t ? req.t('common.server_error') : 'Server error'
+    });
+  }
+};
+
 exports.verifyPasswordAndLogin = async (req, res) => {
   try {
     const { username, password, fcmToken } = req.body;

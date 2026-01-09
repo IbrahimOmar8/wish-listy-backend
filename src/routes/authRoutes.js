@@ -9,6 +9,7 @@ const { protect } = require('../middleware/auth');
 
 router.post('/register', authController.register);
 router.post('/login', authController.verifyPasswordAndLogin);
+router.post('/check-account', authController.checkAccount);
 router.post('/logout', protect, authController.logout);
 router.get('/me', protect, authController.getMe);
 router.get('/profile', protect, authController.getProfile);
