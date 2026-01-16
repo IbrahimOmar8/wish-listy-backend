@@ -7,15 +7,192 @@ const Reservation = require('../models/Reservation');
 const Event = require('../models/Event');
 const EventInvitation = require('../models/Eventinvitation');
 const OTP = require('../models/OTP');
+const PasswordResetToken = require('../models/PasswordResetToken');
 const mongoose = require('mongoose');
 const { generateToken } = require('../utils/jwt');
 const bcrypt = require('bcryptjs');
 const { generateUniqueHandle } = require('../utils/handleGenerator');
 const { translateInterests } = require('../utils/interestsTranslator');
 const { isValidCountryCode, isValidDateFormat, isNotFutureDate } = require('../utils/validators');
+const { sendPasswordResetEmail } = require('../utils/email');
 
-exports.sendPasswordResetLink = async (req, res) => {
-  // Logic to send password reset link (if needed)
+/**
+ * Request Password Reset API
+ * POST /api/auth/request-reset
+ *
+ * Sends a 6-digit OTP code to the user's email for password reset.
+ * If user provides newEmail and doesn't have one, updates their email first.
+ */
+exports.requestPasswordReset = async (req, res) => {
+  try {
+    const { identifier, newEmail } = req.body;
+
+    // Validate identifier is provided
+    if (!identifier) {
+      return res.status(400).json({
+        success: false,
+        message: req.t ? req.t('auth.identifier_required') : 'Username or phone is required'
+      });
+    }
+
+    // Find user by username (which can be phone or username)
+    const searchValue = identifier.toLowerCase().trim();
+    const user = await User.findOne({ username: searchValue });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: req.t ? req.t('auth.user_not_found') : 'User not found'
+      });
+    }
+
+    // If user provides newEmail and doesn't have an email, update it
+    let userEmail = user.email;
+    if (newEmail && !user.email) {
+      // Validate email format
+      const emailRegex = /^\S+@\S+\.\S+$/;
+      if (!emailRegex.test(newEmail.trim())) {
+        return res.status(400).json({
+          success: false,
+          message: req.t ? req.t('validation.invalid_email') : 'Invalid email format'
+        });
+      }
+
+      // Check if email is already used by another user
+      const existingEmailUser = await User.findOne({
+        email: newEmail.toLowerCase().trim(),
+        _id: { $ne: user._id }
+      });
+
+      if (existingEmailUser) {
+        return res.status(400).json({
+          success: false,
+          message: req.t ? req.t('auth.email_exists') : 'Email is already in use'
+        });
+      }
+
+      // Update user's email
+      user.email = newEmail.toLowerCase().trim();
+      await user.save();
+      userEmail = user.email;
+    }
+
+    // Check if user has an email to send OTP
+    if (!userEmail) {
+      return res.status(400).json({
+        success: false,
+        message: req.t ? req.t('auth.no_email') : 'No email associated with this account. Please provide an email.',
+        requiresEmail: true
+      });
+    }
+
+    // Generate password reset OTP
+    const otp = await PasswordResetToken.createForUser(user._id, identifier);
+
+    // Send password reset email with OTP
+    try {
+      await sendPasswordResetEmail(userEmail, otp, user.fullName);
+    } catch (emailError) {
+      console.error('Failed to send reset email:', emailError);
+      // Delete the token if email failed
+      await PasswordResetToken.deleteMany({ user: user._id });
+      return res.status(500).json({
+        success: false,
+        message: req.t ? req.t('auth.email_send_failed') : 'Failed to send reset email. Please try again.'
+      });
+    }
+
+    // Mask email for response (e.g., a***@gmail.com)
+    const maskedEmail = userEmail.replace(/(.{1,2})(.*)(@.*)/, (match, first, middle, domain) => {
+      return first + '*'.repeat(Math.min(middle.length, 5)) + domain;
+    });
+
+    res.status(200).json({
+      success: true,
+      message: req.t ? req.t('auth.otp_sent') : 'Password reset code has been sent to your email',
+      email: maskedEmail
+    });
+  } catch (error) {
+    console.error('Request Password Reset Error:', error);
+    res.status(500).json({
+      success: false,
+      message: req.t ? req.t('common.server_error') : 'Server error'
+    });
+  }
+};
+
+/**
+ * Reset Password API
+ * PATCH /api/auth/reset-password
+ *
+ * Verifies the OTP code and updates the user's password.
+ */
+exports.resetPassword = async (req, res) => {
+  try {
+    const { identifier, otp, newPassword } = req.body;
+
+    // Validate inputs
+    if (!identifier) {
+      return res.status(400).json({
+        success: false,
+        message: req.t ? req.t('auth.identifier_required') : 'Username or phone is required'
+      });
+    }
+
+    if (!otp) {
+      return res.status(400).json({
+        success: false,
+        message: req.t ? req.t('auth.otp_required') : 'OTP code is required'
+      });
+    }
+
+    if (!newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: req.t ? req.t('auth.password_required') : 'New password is required'
+      });
+    }
+
+    // Validate password length
+    if (newPassword.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: req.t ? req.t('auth.password_min_length') : 'Password must be at least 6 characters long'
+      });
+    }
+
+    // Verify OTP and get associated user
+    const resetToken = await PasswordResetToken.verifyOTP(identifier, otp);
+
+    if (!resetToken) {
+      return res.status(400).json({
+        success: false,
+        message: req.t ? req.t('auth.invalid_or_expired_otp') : 'Invalid or expired OTP code'
+      });
+    }
+
+    // Hash the new password
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    // Update user's password
+    await User.findByIdAndUpdate(resetToken.user._id, {
+      password: hashedPassword
+    });
+
+    // Delete the used token (and any other tokens for this user)
+    await PasswordResetToken.deleteMany({ user: resetToken.user._id });
+
+    res.status(200).json({
+      success: true,
+      message: req.t ? req.t('auth.password_reset_success') : 'Password has been reset successfully'
+    });
+  } catch (error) {
+    console.error('Reset Password Error:', error);
+    res.status(500).json({
+      success: false,
+      message: req.t ? req.t('common.server_error') : 'Server error'
+    });
+  }
 };
 
 /**
