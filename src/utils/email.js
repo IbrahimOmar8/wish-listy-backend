@@ -1,29 +1,18 @@
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 
-// Create reusable transporter
-const createTransporter = () => {
-  return nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS
-    }
-  });
-};
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 /**
  * Send password reset OTP email
  * @param {string} to - Recipient email address
  * @param {string} otp - The 6-digit OTP code
  * @param {string} userName - User's name for personalization
- * @returns {Promise<Object>} - Nodemailer info object
+ * @returns {Promise<Object>} - Resend response object
  */
 const sendPasswordResetEmail = async (to, otp, userName = 'User') => {
-  const transporter = createTransporter();
-
-  const mailOptions = {
-    from: `"${process.env.EMAIL_FROM_NAME || 'Wishlisty'}" <${process.env.SMTP_USER}>`,
-    to: to,
+  const { data, error } = await resend.emails.send({
+    from: `${process.env.EMAIL_FROM_NAME || 'Wishlisty'} <onboarding@resend.dev>`,
+    to: [to],
     subject: 'Password Reset Code - Wishlisty',
     html: `
       <!DOCTYPE html>
@@ -99,7 +88,7 @@ const sendPasswordResetEmail = async (to, otp, userName = 'User') => {
       <body>
         <div class="container">
           <div class="header">
-            <h1>🎁 Wishlisty</h1>
+            <h1>Wishlisty</h1>
           </div>
           <div class="content">
             <p>مرحباً ${userName}،</p>
@@ -107,11 +96,11 @@ const sendPasswordResetEmail = async (to, otp, userName = 'User') => {
             <p>استخدم الكود التالي لإعادة تعيين كلمة المرور:</p>
             <div class="otp-code">${otp}</div>
             <div class="warning">
-              ⚠️ هذا الكود صالح لمدة 15 دقيقة فقط. إذا لم تطلب إعادة تعيين كلمة المرور، يمكنك تجاهل هذا البريد.
+              هذا الكود صالح لمدة 15 دقيقة فقط. إذا لم تطلب إعادة تعيين كلمة المرور، يمكنك تجاهل هذا البريد.
             </div>
           </div>
           <div class="footer">
-            <p>فريق Wishlisty 💜</p>
+            <p>فريق Wishlisty</p>
             <p>هذا البريد الإلكتروني تم إرساله تلقائياً، يرجى عدم الرد عليه.</p>
           </div>
         </div>
@@ -131,10 +120,13 @@ const sendPasswordResetEmail = async (to, otp, userName = 'User') => {
 
       فريق Wishlisty
     `
-  };
+  });
 
-  const info = await transporter.sendMail(mailOptions);
-  return info;
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data;
 };
 
 module.exports = {
