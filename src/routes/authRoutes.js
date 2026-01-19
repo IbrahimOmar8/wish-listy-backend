@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const authController = require('../controllers/authController');
 const { protect } = require('../middleware/auth');
+const { uploadSingle } = require('../middleware/upload');
 
 // Remove OTP routes if not implemented
 // router.post('/send-otp', authController.sendOTPCode);
@@ -16,6 +17,7 @@ router.post('/logout', protect, authController.logout);
 router.get('/me', protect, authController.getMe);
 router.get('/profile', protect, authController.getProfile);
 router.put('/profile', protect, authController.updateProfile);
+router.put('/profile/edit', protect, uploadSingle('image'), authController.updateProfileWithImage);
 router.delete('/delete-account', protect, authController.deleteAccount);
 
 module.exports = router;

@@ -15,6 +15,10 @@ const { generateUniqueHandle } = require('../utils/handleGenerator');
 const { translateInterests } = require('../utils/interestsTranslator');
 const { isValidCountryCode, isValidDateFormat, isNotFutureDate } = require('../utils/validators');
 const { sendPasswordResetEmail } = require('../utils/email');
+const { uploadProfileImage, deleteImage } = require('../config/cloudinary');
+const fs = require('fs').promises;
+const path = require('path');
+const os = require('os');
 
 /**
  * Request Password Reset API
@@ -675,6 +679,219 @@ exports.updateProfile = async (req, res) => {
     res.status(500).json({
       success: false,
       message: req.t('common.server_error'),
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Update Profile with Image
+ * PUT /api/auth/profile/edit
+ *
+ * Updates profile data and optionally the profile image in a single request.
+ * Accepts multipart/form-data with optional image field.
+ */
+exports.updateProfileWithImage = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { bio, gender, birth_date, country_code, fullName, email, phone } = req.body;
+
+    // Build update object with only provided fields
+    const updateData = {};
+
+    // Validate and update fullName
+    if (fullName !== undefined) {
+      if (typeof fullName !== 'string' || fullName.trim().length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: req.t ? req.t('auth.fullname_required') : 'Full name is required'
+        });
+      }
+      updateData.fullName = fullName.trim();
+    }
+
+    // Validate and update email
+    if (email !== undefined) {
+      if (email && typeof email === 'string' && email.trim().length > 0) {
+        const emailRegex = /^\S+@\S+\.\S+$/;
+        if (!emailRegex.test(email.trim())) {
+          return res.status(400).json({
+            success: false,
+            message: req.t ? req.t('validation.invalid_format') : 'Invalid email format'
+          });
+        }
+        updateData.email = email.trim().toLowerCase();
+      } else {
+        updateData.email = null;
+      }
+    }
+
+    // Validate and update phone
+    if (phone !== undefined) {
+      updateData.phone = phone ? phone.trim() : null;
+    }
+
+    // Validate and update bio
+    if (bio !== undefined) {
+      if (bio && typeof bio === 'string') {
+        if (bio.trim().length > 500) {
+          return res.status(400).json({
+            success: false,
+            message: req.t ? req.t('validation.max_length') : 'Bio must be 500 characters or less'
+          });
+        }
+        updateData.bio = bio.trim() || null;
+      } else {
+        updateData.bio = null;
+      }
+    }
+
+    // Validate and update gender
+    if (gender !== undefined) {
+      if (gender === null || gender === '') {
+        updateData.gender = null;
+      } else if (!['male', 'female'].includes(gender)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Gender must be either "male" or "female"'
+        });
+      } else {
+        updateData.gender = gender;
+      }
+    }
+
+    // Validate and update birth_date
+    if (birth_date !== undefined) {
+      if (birth_date === null || birth_date === '') {
+        updateData.birth_date = null;
+      } else {
+        if (!isValidDateFormat(birth_date)) {
+          return res.status(400).json({
+            success: false,
+            message: 'Birth date must be in YYYY-MM-DD format'
+          });
+        }
+        if (!isNotFutureDate(birth_date)) {
+          return res.status(400).json({
+            success: false,
+            message: 'Birth date cannot be in the future'
+          });
+        }
+        updateData.birth_date = new Date(birth_date + 'T00:00:00.000Z');
+      }
+    }
+
+    // Validate and update country_code
+    if (country_code !== undefined) {
+      if (country_code === null || country_code === '') {
+        updateData.country_code = null;
+      } else {
+        const upperCode = typeof country_code === 'string' ? country_code.trim().toUpperCase() : country_code;
+        if (!isValidCountryCode(upperCode)) {
+          return res.status(400).json({
+            success: false,
+            message: 'Country code must be a valid ISO 3166-1 alpha-2 code (2 uppercase letters, e.g., EG, SA, US)'
+          });
+        }
+        updateData.country_code = upperCode;
+      }
+    }
+
+    // Handle profile image upload if provided
+    if (req.file) {
+      // Get current user to check for existing image
+      const currentUser = await User.findById(userId);
+
+      // Delete old image from Cloudinary if exists
+      if (currentUser && currentUser.profileImage) {
+        try {
+          const urlParts = currentUser.profileImage.split('/');
+          const fileWithExt = urlParts[urlParts.length - 1];
+          const publicId = `wishlisty/profiles/${fileWithExt.split('.')[0]}`;
+          await deleteImage(publicId);
+        } catch (deleteErr) {
+          console.error('Failed to delete old profile image:', deleteErr);
+        }
+      }
+
+      // Create temporary file from buffer
+      const tempFilePath = path.join(
+        os.tmpdir(),
+        `profile-${Date.now()}-${req.file.originalname}`
+      );
+
+      await fs.writeFile(tempFilePath, req.file.buffer);
+
+      // Upload to Cloudinary
+      const result = await uploadProfileImage(tempFilePath);
+
+      // Delete temporary file
+      await fs.unlink(tempFilePath).catch(() => {});
+
+      // Add image URL to update data
+      updateData.profileImage = result.url;
+    }
+
+    // Update user
+    const updatedUser = await User.findByIdAndUpdate(
+      userId,
+      updateData,
+      { new: true, runValidators: true }
+    ).select('_id fullName username handle email phone profileImage bio gender birth_date country_code interests preferredLanguage createdAt updatedAt');
+
+    if (!updatedUser) {
+      return res.status(404).json({
+        success: false,
+        message: req.t ? req.t('user.not_found') : 'User not found'
+      });
+    }
+
+    // Format response
+    let userData = updatedUser.toObject();
+
+    // Translate interests
+    if (userData.interests && Array.isArray(userData.interests)) {
+      const userLanguage = userData.preferredLanguage || 'en';
+      userData.interests = translateInterests(userData.interests, userLanguage);
+    }
+
+    // Format birth_date to YYYY-MM-DD if exists
+    if (userData.birth_date) {
+      const date = new Date(userData.birth_date);
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      userData.birth_date = `${year}-${month}-${day}`;
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Profile updated successfully',
+      data: userData
+    });
+  } catch (error) {
+    console.error('Update profile with image error:', error);
+
+    // Handle Mongoose validation errors
+    if (error.name === 'ValidationError') {
+      const messages = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({
+        success: false,
+        message: messages.join(', ')
+      });
+    }
+
+    // Handle duplicate key error
+    if (error.code === 11000) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email or username already exists'
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: req.t ? req.t('common.server_error') : 'Server error',
       error: error.message
     });
   }
