@@ -115,7 +115,11 @@ async function createNotification({
         // Calculate unread count with badge dismissal logic
         const unreadCount = await getUnreadCountWithBadge(recipientId);
 
-        // Emit to recipient's room
+        // Emit to recipient's room using room-based emission
+        // This works seamlessly with dynamic authentication:
+        // - Authenticated users are automatically in their userId room
+        // - Rooms only contain authenticated sockets (via 'authenticate' event or initial auth)
+        // - If user is not connected/authenticated, emit is silently ignored (no error)
         socketIo.to(recipientId.toString()).emit('notification', {
           notification: notification.toObject(),
           unreadCount

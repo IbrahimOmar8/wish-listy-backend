@@ -5,6 +5,10 @@ const initializeSocket = (server) => {
   console.log('🔧 Initializing Socket.IO...');
   console.log('📡 Server address:', server.address());
   
+  // Global Map to store active user-to-socket mappings
+  // Key: userId (string), Value: socketId (string)
+  const userSockets = new Map();
+  
   const io = socketIO(server, {
     cors: {
       origin: '*', // Allow all origins for development
@@ -30,7 +34,7 @@ const initializeSocket = (server) => {
   console.log('✅ Socket.IO initialized successfully');
   console.log('📡 Socket.IO is ready to accept connections');
 
-  // Socket authentication middleware
+  // Socket authentication middleware - supports optional authentication
   io.use((socket, next) => {
     console.log('🔌 Socket connection attempt');
     console.log('Socket ID:', socket.id);
@@ -38,20 +42,39 @@ const initializeSocket = (server) => {
     console.log('Headers:', socket.handshake.headers);
     
     try {
-      const token = socket.handshake.auth.token;
+      const token = socket.handshake.auth.token || 
+                    socket.handshake.headers.authorization?.replace('Bearer ', '');
 
+      // Allow connection even without token (authentication can happen later via 'authenticate' event)
       if (!token) {
-        console.log('❌ Authentication error: Token not provided');
-        return next(new Error('Authentication error: Token not provided'));
+        console.log('⚠️ No token provided - allowing unauthenticated connection');
+        socket.userId = null;
+        socket.isAuthenticated = false;
+        return next();
       }
 
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      socket.userId = decoded.id;
-      console.log('✅ Token verified for user:', socket.userId);
+      // If token is provided, verify it and set userId
+      try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        socket.userId = decoded.id;
+        socket.isAuthenticated = true;
+        console.log('✅ Token verified for user:', socket.userId);
+      } catch (authError) {
+        // Log auth error but don't reject connection (allows 'authenticate' event later)
+        console.log('⚠️ Token verification failed:', authError.message);
+        console.log('⚠️ Allowing connection - user can authenticate later via "authenticate" event');
+        socket.userId = null;
+        socket.isAuthenticated = false;
+      }
+      
       next();
     } catch (error) {
-      console.log('❌ Authentication error:', error.message);
-      next(new Error('Authentication error: Invalid token'));
+      // Log error but allow connection (allows post-login authentication)
+      console.log('⚠️ Authentication middleware error:', error.message);
+      console.log('⚠️ Allowing connection - user can authenticate later via "authenticate" event');
+      socket.userId = null;
+      socket.isAuthenticated = false;
+      next();
     }
   });
 
@@ -59,28 +82,111 @@ const initializeSocket = (server) => {
     console.log('═══════════════════════════════════════════════════════');
     console.log('🔌 Socket connection established');
     console.log('📌 Socket ID:', socket.id);
-    console.log('👤 User ID:', socket.userId);
+    console.log('👤 User ID:', socket.userId || 'Not authenticated');
     console.log('🔑 Auth:', socket.handshake.auth);
     console.log('📋 Headers:', socket.handshake.headers);
-    console.log(`✅ User ${socket.userId} connected with Socket ID: ${socket.id}`);
     console.log('═══════════════════════════════════════════════════════');
 
-    // Join user to their personal room
-    socket.join(socket.userId);
-    console.log(`📍 User ${socket.userId} joined room: ${socket.userId}`);
+    // If authenticated on connect, map user and join room
+    if (socket.userId) {
+      // Map userId to socketId in userSockets Map
+      userSockets.set(socket.userId.toString(), socket.id);
+      console.log(`✅ User ${socket.userId} mapped to Socket ID: ${socket.id}`);
+      
+      // Join user to their personal room
+      socket.join(socket.userId.toString());
+      console.log(`📍 User ${socket.userId} joined room: ${socket.userId}`);
+      console.log(`📊 Total active users: ${userSockets.size}`);
+    } else {
+      console.log('⚠️ Socket connected without authentication - waiting for "authenticate" event');
+    }
+
+    // Handle 'authenticate' event for post-login identity sync
+    socket.on('authenticate', async (data) => {
+      try {
+        const { token } = data;
+
+        if (!token) {
+          console.log('❌ Authenticate event: Token not provided');
+          return socket.emit('authentication_error', {
+            message: 'Token is required for authentication'
+          });
+        }
+
+        // Verify JWT token
+        let decoded;
+        try {
+          decoded = jwt.verify(token, process.env.JWT_SECRET);
+        } catch (verifyError) {
+          console.log('❌ Authenticate event: Invalid token -', verifyError.message);
+          return socket.emit('authentication_error', {
+            message: 'Invalid or expired token'
+          });
+        }
+
+        // Extract userId from decoded payload
+        const userId = decoded.id.toString();
+
+        // If already authenticated with different user, log warning
+        if (socket.userId && socket.userId.toString() !== userId) {
+          console.log(`⚠️ Socket ${socket.id} re-authenticating as different user: ${userId}`);
+          // Remove old mapping
+          userSockets.delete(socket.userId.toString());
+        }
+
+        // Map socket: userSockets.set(userId, socket.id)
+        userSockets.set(userId, socket.id);
+        console.log(`✅ User ${userId} authenticated and mapped to Socket ID: ${socket.id}`);
+
+        // Join private room: socket.join(userId)
+        socket.join(userId);
+        console.log(`📍 User ${userId} joined room: ${userId}`);
+
+        // Set socket.userId for future reference
+        socket.userId = userId;
+        socket.isAuthenticated = true;
+
+        // Emit 'authenticated' confirmation
+        socket.emit('authenticated', { status: 'ok', userId: userId });
+        console.log(`✅ Authentication successful for user ${userId}`);
+        console.log(`📊 Total active users: ${userSockets.size}`);
+      } catch (error) {
+        console.error('❌ Authenticate event error:', error);
+        socket.emit('authentication_error', {
+          message: 'Authentication failed: ' + error.message
+        });
+      }
+    });
 
     // Handle disconnect
     socket.on('disconnect', (reason) => {
       console.log('═══════════════════════════════════════════════════════');
       console.log(`❌ User disconnected`);
-      console.log('👤 User ID:', socket.userId);
+      console.log('👤 User ID:', socket.userId || 'Not authenticated');
       console.log('📌 Socket ID:', socket.id);
       console.log('📝 Disconnect reason:', reason);
+      
+      // Cleanup: Remove user from userSockets Map if authenticated
+      if (socket.userId) {
+        const userId = socket.userId.toString();
+        // Check if this socket is still mapped to this user (handles re-authentication cases)
+        if (userSockets.get(userId) === socket.id) {
+          userSockets.delete(userId);
+          console.log(`🗑️ Removed user ${userId} from userSockets Map`);
+        }
+        // Room leaving is handled automatically by Socket.IO
+      }
+      
+      console.log(`📊 Total active users: ${userSockets.size}`);
       console.log('═══════════════════════════════════════════════════════');
     });
 
     // Optional: Handle user typing events, read receipts, etc.
     socket.on('user_online', () => {
+      if (!socket.userId) {
+        return socket.emit('error', { message: 'Must be authenticated to use this event' });
+      }
+      
       socket.broadcast.emit('user_status', {
         userId: socket.userId,
         status: 'online'
