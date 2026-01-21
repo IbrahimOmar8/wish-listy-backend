@@ -154,6 +154,12 @@ userSchema.pre('save', function(next) {
   next();
 });
 
+// Indexes for Unified Triple-Field Search optimization
+// These indexes improve search performance for fullName, handle, and username queries
+userSchema.index({ fullName: 1 });  // Index for display name search
+userSchema.index({ handle: 1 });     // Index for @handle search (sparse unique already exists)
+// Note: username already has a unique index from the schema definition
+
 // Method to compare passwords
 userSchema.methods.comparePassword = async function(candidatePassword) {
   return await bcrypt.compare(candidatePassword, this.password);

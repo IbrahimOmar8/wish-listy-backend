@@ -5,51 +5,54 @@ const Event = require('../models/Event');
 const { translateInterests } = require('../utils/interestsTranslator');
 const { isValidCountryCode, isValidDateFormat, isNotFutureDate } = require('../utils/validators');
 
-// Search users by username, email, or phone
+// Search users by fullName, handle, or username (Unified Triple-Field Search)
 exports.searchUsers = async (req, res) => {
   try {
-    const { type, value } = req.query;
+    const { q, value, type } = req.query;
     const currentUserId = req.user._id;
 
+    // Support both 'q' (new unified) and 'value' (legacy) query parameters
+    const searchInput = q || value;
+
     // Validate query parameters
-    if (!type || !value) {
+    if (!searchInput || searchInput.trim().length === 0) {
       return res.status(400).json({
         success: false,
         message: req.t('validation.val_search_params_required')
       });
     }
 
-    if (!['username', 'email', 'phone'].includes(type)) {
-      return res.status(400).json({
-        success: false,
-        message: req.t('validation.val_search_type_invalid', { types: 'username, email, phone' })
-      });
-    }
+    // Sanitize and prepare search value
+    // Remove @ prefix if present (for handle searches)
+    const trimmedValue = searchInput.trim().replace(/^@/, '');
+    
+    // Escape special regex characters to prevent injection and handle special chars like @ and .
+    const escapedValue = trimmedValue.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
     let searchQuery = {};
 
-    // Build search query based on type
-    if (type === 'username') {
-      // Search in both username and handle fields
-      // Remove @ prefix from value if present for handle search
-      const searchValue = value.replace(/^@/, ''); // Remove @ if user provided it
-      const escapedValue = searchValue.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // Escape special regex characters
-      
-      // Search in username field
-      searchQuery.$or = [
-        { username: { $regex: `^${escapedValue}`, $options: 'i' } },
-        { handle: { $regex: `^@?${escapedValue}`, $options: 'i' } } // Match with or without @ prefix
-      ];
-    } else if (type === 'email') {
-      searchQuery.email = { $regex: `^${value}`, $options: 'i' };
-    } else if (type === 'phone') {
-      searchQuery.phone = { $regex: `^${value}`, $options: 'i' };
-    }
+    // Unified Triple-Field Search: Query fullName, handle, and username simultaneously
+    // Uses $or operator - a match in ANY field returns the user
+    // Partial & case-insensitive matching with $regex and $options: 'i'
+    searchQuery.$or = [
+      // Search in fullName (display name) - partial match anywhere in the string
+      { fullName: { $regex: escapedValue, $options: 'i' } },
+      // Search in handle - match with or without @ prefix
+      { handle: { $regex: `^@?${escapedValue}`, $options: 'i' } },
+      // Search in username (email or phone) - partial match from start
+      { username: { $regex: escapedValue, $options: 'i' } }
+    ];
 
     // Exclude current user from search results
     searchQuery._id = { $ne: currentUserId };
 
     // Search users and return safe fields only
+    // INDEXING RECOMMENDATION: For optimal performance, ensure indexes exist on:
+    // - fullName (text or regular index)
+    // - handle (regular index)  
+    // - username (regular index - already has unique index)
+    // Run: db.users.createIndex({ fullName: 1 })
+    // Run: db.users.createIndex({ handle: 1 })
     const users = await User.find(searchQuery)
       .select('_id fullName username handle profileImage friends')
       .limit(20);
