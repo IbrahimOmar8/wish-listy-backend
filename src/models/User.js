@@ -14,8 +14,16 @@ const userSchema = new mongoose.Schema({
     trim: true,
     lowercase: true,
     minlength: [3, 'Username must be at least 3 characters long'],
-    match: [ /^[a-zA-Z0-9_.@\-]+$/, 'Username can only contain letters, numbers, underscores, hyphens, dots, and @ symbol'
-]
+    validate: {
+      validator: function(value) {
+        // Allow valid email or phone number format
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        const phoneRegex = /^\+?[0-9]{7,15}$/;
+        const normalizedPhone = value.replace(/[\s\-()]/g, '');
+        return emailRegex.test(value) || phoneRegex.test(normalizedPhone);
+      },
+      message: 'Username must be a valid email address or phone number'
+    }
   },
   handle: {
     type: String,

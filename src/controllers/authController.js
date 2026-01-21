@@ -346,9 +346,13 @@ exports.register = async (req, res) => {
       });
     }
 
-    // Validate username format (alphanumeric, underscore, hyphen only)
-    const usernameRegex = /^[a-zA-Z0-9_-]+$/;
-    if (!usernameRegex.test(username)) {
+    // Validate username format (must be a valid email or phone number)
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const phoneRegex = /^\+?[0-9]{7,15}$/;
+    const isValidEmail = emailRegex.test(username);
+    const isValidPhone = phoneRegex.test(username.replace(/[\s\-()]/g, ''));
+    
+    if (!isValidEmail && !isValidPhone) {
       return res.status(400).json({
         success: false,
         message: req.t('auth.username_format')

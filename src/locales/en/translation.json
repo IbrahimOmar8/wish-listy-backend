@@ -19,7 +19,7 @@
     "fullname_username_password_required": "Full name, username, and password are required",
     "fullname_required": "Full name must be a non-empty string",
     "username_required": "Username must be at least 3 characters long",
-    "username_format": "Username can only contain letters, numbers, underscores, and hyphens",
+    "username_format": "Username must be a valid email address or phone number",
     "password_required": "Password must be at least 6 characters long",
     "username_exists": "Username already exists",
     "logout_success": "Logged out successfully",
