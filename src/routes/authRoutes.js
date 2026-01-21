@@ -13,6 +13,7 @@ router.post('/login', authController.verifyPasswordAndLogin);
 router.post('/check-account', authController.checkAccount);
 router.post('/request-reset', authController.requestPasswordReset);
 router.patch('/reset-password', authController.resetPassword);
+router.patch('/change-password', protect, authController.changePassword);
 router.post('/logout', protect, authController.logout);
 router.get('/me', protect, authController.getMe);
 router.get('/profile', protect, authController.getProfile);

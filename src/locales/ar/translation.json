@@ -24,7 +24,12 @@
     "username_exists": "اسم المستخدم موجود بالفعل",
     "logout_success": "تم تسجيل الخروج بنجاح",
     "logout_failed": "خطأ في تسجيل الخروج",
-    "get_user_failed": "فشل الحصول على بيانات المستخدم"
+    "get_user_failed": "فشل الحصول على بيانات المستخدم",
+    "current_password_required": "كلمة المرور الحالية مطلوبة",
+    "new_password_required": "كلمة المرور الجديدة مطلوبة",
+    "current_password_incorrect": "كلمة المرور الحالية غير صحيحة",
+    "password_same_as_current": "كلمة المرور الجديدة يجب أن تكون مختلفة عن الحالية",
+    "password_changed_success": "تم تغيير كلمة المرور بنجاح"
   },
   "validation": {
     "required": "هذا الحقل مطلوب",

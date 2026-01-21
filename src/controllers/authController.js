@@ -200,6 +200,96 @@ exports.resetPassword = async (req, res) => {
 };
 
 /**
+ * Change Password API
+ * PATCH /api/auth/change-password
+ * 
+ * Allows authenticated users to change their password by providing
+ * their current password and a new password.
+ * 
+ * Protected route - requires authentication
+ */
+exports.changePassword = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { currentPassword, newPassword } = req.body;
+
+    // Validate that current password is provided
+    if (!currentPassword) {
+      return res.status(400).json({
+        success: false,
+        message: req.t ? req.t('auth.current_password_required') : 'Current password is required'
+      });
+    }
+
+    // Validate that new password is provided
+    if (!newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: req.t ? req.t('auth.new_password_required') : 'New password is required'
+      });
+    }
+
+    // Validate new password length (minimum 6 characters)
+    if (newPassword.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: req.t ? req.t('auth.password_required') : 'Password must be at least 6 characters long'
+      });
+    }
+
+    // Get user with password field (normally excluded)
+    const user = await User.findById(userId).select('+password');
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: req.t ? req.t('auth.user_not_found') : 'User not found'
+      });
+    }
+
+    // Verify current password
+    const isPasswordValid = await bcrypt.compare(currentPassword, user.password);
+
+    if (!isPasswordValid) {
+      return res.status(400).json({
+        success: false,
+        message: req.t ? req.t('auth.current_password_incorrect') : 'Current password is incorrect'
+      });
+    }
+
+    // Check if new password is same as current password
+    const isSamePassword = await bcrypt.compare(newPassword, user.password);
+
+    if (isSamePassword) {
+      return res.status(400).json({
+        success: false,
+        message: req.t ? req.t('auth.password_same_as_current') : 'New password must be different from current password'
+      });
+    }
+
+    // Hash the new password
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    // Update user's password
+    await User.findByIdAndUpdate(userId, {
+      password: hashedPassword,
+      updatedAt: new Date()
+    });
+
+    res.status(200).json({
+      success: true,
+      message: req.t ? req.t('auth.password_changed_success') : 'Password changed successfully'
+    });
+  } catch (error) {
+    console.error('Change Password Error:', error);
+    res.status(500).json({
+      success: false,
+      message: req.t ? req.t('common.server_error') : 'Server error'
+    });
+  }
+};
+
+/**
  * Check Account API
  * POST /api/auth/check-account
  * 
