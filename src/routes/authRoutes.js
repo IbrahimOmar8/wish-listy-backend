@@ -21,4 +21,8 @@ router.put('/profile', protect, authController.updateProfile);
 router.put('/profile/edit', protect, uploadSingle('image'), authController.updateProfileWithImage);
 router.delete('/delete-account', protect, authController.deleteAccount);
 
+// FCM Token management for push notifications
+router.put('/fcm-token', protect, authController.updateFcmToken);
+router.delete('/fcm-token', protect, authController.removeFcmToken);
+
 module.exports = router;

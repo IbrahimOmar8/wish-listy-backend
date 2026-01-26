@@ -1,6 +1,7 @@
 const Notification = require('../models/Notification');
 const User = require('../models/User');
 const i18next = require('i18next');
+const { sendPushNotification } = require('./pushNotification');
 
 /**
  * Helper function to calculate unread count with badge dismissal logic
@@ -109,17 +110,16 @@ async function createNotification({
       await notification.populate('relatedUser', 'fullName username profileImage');
     }
 
+    // Calculate unread count with badge dismissal logic
+    const unreadCount = await getUnreadCountWithBadge(recipientId);
+
     // Emit Socket.IO event if requested and socketIo is available
     if (emitSocketEvent && socketIo) {
       try {
         // Calculate unread count with badge dismissal logic
         const unreadCount = await getUnreadCountWithBadge(recipientId);
 
-        // Emit to recipient's room using room-based emission
-        // This works seamlessly with dynamic authentication:
-        // - Authenticated users are automatically in their userId room
-        // - Rooms only contain authenticated sockets (via 'authenticate' event or initial auth)
-        // - If user is not connected/authenticated, emit is silently ignored (no error)
+        // Emit to recipient's room
         socketIo.to(recipientId.toString()).emit('notification', {
           notification: notification.toObject(),
           unreadCount
@@ -128,6 +128,24 @@ async function createNotification({
         // Log socket error but don't fail the notification creation
         console.error('Socket.IO emit error:', socketError);
       }
+    }
+
+    // Send push notification (for when app is in background/closed)
+    try {
+      await sendPushNotification(recipientId, {
+        title: title,
+        body: finalMessage,
+        data: {
+          type: type,
+          notificationId: notification._id.toString(),
+          relatedId: relatedId ? relatedId.toString() : '',
+          relatedWishlistId: relatedWishlistId ? relatedWishlistId.toString() : '',
+          unreadCount: unreadCount.toString(),
+        },
+      });
+    } catch (pushError) {
+      // Log push error but don't fail the notification creation
+      console.error('Push notification error:', pushError);
     }
 
     return notification;

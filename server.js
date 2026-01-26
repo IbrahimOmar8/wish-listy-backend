@@ -2,11 +2,15 @@ require('dotenv').config();
 const app = require('./src/app');
 const connectDB = require('./src/config/database');
 const initializeSocket = require('./src/socket');
+const { initializeFirebase } = require('./src/config/firebase');
 
 const PORT = process.env.PORT || 4000;
 
 // Connect to database
 connectDB();
+
+// Initialize Firebase for push notifications
+initializeFirebase();
 
 // Listen on all network interfaces (0.0.0.0) to allow connections from mobile devices on the same network
 const server = app.listen(PORT, '0.0.0.0', () => {

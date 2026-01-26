@@ -16,6 +16,7 @@ const { translateInterests } = require('../utils/interestsTranslator');
 const { isValidCountryCode, isValidDateFormat, isNotFutureDate } = require('../utils/validators');
 const { sendPasswordResetEmail } = require('../utils/email');
 const { uploadProfileImage, deleteImage } = require('../config/cloudinary');
+const { updateFcmToken, removeFcmToken } = require('../utils/pushNotification');
 const fs = require('fs').promises;
 const path = require('path');
 const os = require('os');
@@ -994,9 +995,9 @@ exports.updateProfileWithImage = async (req, res) => {
 // Logout user
 exports.logout = async (req, res) => {
   try {
-    // Since JWT is stateless, logout is primarily handled on the client side
-    // by removing the token from storage. This endpoint can be used for
-    // server-side logging or future token blacklisting if needed.
+    // Remove FCM token to stop receiving push notifications
+    await removeFcmToken(req.user.id);
+
     res.status(200).json({
       success: true,
       message: req.t('auth.logout_success')
@@ -1006,6 +1007,76 @@ exports.logout = async (req, res) => {
       success: false,
       message: req.t('auth.logout_failed'),
       error: error.message
+    });
+  }
+};
+
+/**
+ * Update FCM Token
+ * PUT /api/auth/fcm-token
+ *
+ * Updates the user's FCM token for push notifications.
+ * Should be called when the app gets a new FCM token.
+ */
+exports.updateFcmToken = async (req, res) => {
+  try {
+    const { fcmToken } = req.body;
+
+    if (!fcmToken) {
+      return res.status(400).json({
+        success: false,
+        message: 'FCM token is required'
+      });
+    }
+
+    const success = await updateFcmToken(req.user.id, fcmToken);
+
+    if (success) {
+      res.status(200).json({
+        success: true,
+        message: 'FCM token updated successfully'
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        message: 'Failed to update FCM token'
+      });
+    }
+  } catch (error) {
+    console.error('Update FCM token error:', error);
+    res.status(500).json({
+      success: false,
+      message: req.t ? req.t('common.server_error') : 'Server error'
+    });
+  }
+};
+
+/**
+ * Remove FCM Token
+ * DELETE /api/auth/fcm-token
+ *
+ * Removes the user's FCM token. Call this when the user wants to disable push notifications.
+ */
+exports.removeFcmToken = async (req, res) => {
+  try {
+    const success = await removeFcmToken(req.user.id);
+
+    if (success) {
+      res.status(200).json({
+        success: true,
+        message: 'FCM token removed successfully'
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        message: 'Failed to remove FCM token'
+      });
+    }
+  } catch (error) {
+    console.error('Remove FCM token error:', error);
+    res.status(500).json({
+      success: false,
+      message: req.t ? req.t('common.server_error') : 'Server error'
     });
   }
 };
