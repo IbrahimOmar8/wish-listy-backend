@@ -578,14 +578,31 @@ exports.register = async (req, res) => {
     }
     
     // Check if user already exists (using normalized username)
+    console.log(`🔍 Searching for existing user with normalized username: ${normalizedUsername}`);
     const existingUser = await User.findOne({ username: normalizedUsername });
 
-    // If user exists and is already verified, reject registration
-    if (existingUser && existingUser.isVerified === true) {
-      return res.status(400).json({
-        success: false,
-        message: req.t('auth.username_exists')
-      });
+    // If user exists, check verification status
+    if (existingUser) {
+      console.log(`🔍 Existing user found:`);
+      console.log(`   - ID: ${existingUser._id}`);
+      console.log(`   - Username: ${existingUser.username}`);
+      console.log(`   - isVerified: ${existingUser.isVerified} (type: ${typeof existingUser.isVerified})`);
+      console.log(`   - isVerified === true: ${existingUser.isVerified === true}`);
+      console.log(`   - !isVerified: ${!existingUser.isVerified}`);
+      
+      // If user is verified, reject registration
+      if (existingUser.isVerified) {
+        console.log(`❌ User ${existingUser._id} is already verified - rejecting registration`);
+        return res.status(400).json({
+          success: false,
+          message: req.t('auth.username_exists')
+        });
+      }
+      
+      // If not verified, the code will CONTINUE to the re-verification logic below
+      console.log(`✅ User ${existingUser._id} is not verified - proceeding with re-verification`);
+    } else {
+      console.log(`✅ No existing user found - proceeding with new registration`);
     }
 
     // Hash password before saving
@@ -602,17 +619,16 @@ exports.register = async (req, res) => {
       generatedHandle = null;
     }
 
-    // Detect if username is email or phone (using already normalized username)
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    const phoneRegex = /^\+?[0-9]{7,15}$/;
-    const isEmail = emailRegex.test(normalizedUsername);
-    const isPhone = phoneRegex.test(normalizedUsername);
+    // Detect if username is email or phone (reuse validation results from above)
+    // We already have isValidEmail and isValidPhone from validation step
+    const isEmail = isValidEmail;
+    const isPhone = isValidPhone;
     
     // For phone, normalizedUsername is already normalized (spaces, dashes, parentheses removed)
     const normalizedPhone = isPhone ? normalizedUsername : null;
 
-    // Handle existing unverified user
-    if (existingUser && existingUser.isVerified === false) {
+    // Handle existing unverified user (isVerified is false, null, or undefined)
+    if (existingUser && !existingUser.isVerified) {
       // Update user information (fullName and password can be changed)
       existingUser.fullName = fullName.trim();
       existingUser.password = hashedPassword;
@@ -1385,13 +1401,25 @@ exports.removeFcmToken = async (req, res) => {
  */
 const deleteUserAccount = async (userId) => {
   const session = await mongoose.startSession();
-  session.startTransaction();
-
+  
   try {
+    session.startTransaction();
+    
+    console.log(`🗑️ Starting account deletion for user: ${userId}`);
+    
     // Step 0: Get user data before deletion (for profile image and phone cleanup if needed)
     const user = await User.findById(userId).select('profileImage phone').session(session);
+    
+    if (!user) {
+      await session.abortTransaction();
+      session.endSession();
+      throw new Error('User not found');
+    }
+    
     const profileImageUrl = user?.profileImage;
     const userPhone = user?.phone;
+    
+    console.log(`📋 User found: ${user._id}, Phone: ${userPhone || 'N/A'}`);
 
     // Step 1: Get user's wishlists to delete items later
     const userWishlists = await Wishlist.find({ owner: userId }).select('_id').session(session);
@@ -1469,6 +1497,9 @@ const deleteUserAccount = async (userId) => {
       await OTP.deleteMany({ phoneNumber: userPhone }).session(session);
     }
 
+    // Step 13.5: Delete PasswordResetToken records for this user
+    await PasswordResetToken.deleteMany({ user: userId }).session(session);
+
     // Step 14: Delete profile images from storage (if applicable)
     // Note: This is a placeholder. Implement actual file deletion if using
     // AWS S3, Firebase Storage, or other cloud storage services.
@@ -1480,17 +1511,33 @@ const deleteUserAccount = async (userId) => {
     // Implement cloud storage deletion if you're using S3/Firebase/etc.
 
     // Step 15: Finally, delete the User record
-    await User.findByIdAndDelete(userId).session(session);
+    const deleteResult = await User.findByIdAndDelete(userId).session(session);
+    
+    if (!deleteResult) {
+      throw new Error('Failed to delete user record');
+    }
+    
+    console.log(`✅ User record deleted: ${userId}`);
 
     // Commit the transaction
     await session.commitTransaction();
-    session.endSession();
+    console.log(`✅ Transaction committed successfully for user: ${userId}`);
+    
+    // End session
+    await session.endSession();
 
     return { success: true };
   } catch (error) {
     // Rollback the transaction on error
-    await session.abortTransaction();
-    session.endSession();
+    console.error(`❌ Error during account deletion for user ${userId}:`, error);
+    
+    try {
+      await session.abortTransaction();
+      await session.endSession();
+    } catch (sessionError) {
+      console.error('Error aborting transaction:', sessionError);
+    }
+    
     throw error;
   }
 };
@@ -1507,7 +1554,7 @@ exports.deleteAccount = async (req, res) => {
   try {
     // Security: Extract userId from JWT token (req.user.id), not from request body
     // This prevents IDOR (Insecure Direct Object Reference) attacks
-    const userId = req.user.id;
+    let userId = req.user.id;
 
     if (!userId) {
       return res.status(401).json({
@@ -1515,6 +1562,17 @@ exports.deleteAccount = async (req, res) => {
         message: 'Unauthorized: Invalid authentication token'
       });
     }
+
+    // Ensure userId is a valid ObjectId
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid user ID format'
+      });
+    }
+
+    // Convert to ObjectId if it's a string
+    userId = new mongoose.Types.ObjectId(userId);
 
     // Verify user exists before attempting deletion
     const user = await User.findById(userId);
@@ -1525,8 +1583,25 @@ exports.deleteAccount = async (req, res) => {
       });
     }
 
+    console.log(`🚀 Delete account request for user: ${userId} (${user.username})`);
+
     // Perform cascading deletion with transaction support
-    await deleteUserAccount(userId);
+    const result = await deleteUserAccount(userId);
+    
+    if (!result || !result.success) {
+      throw new Error('Account deletion failed - no result returned');
+    }
+
+    // Verify user is actually deleted (wait a bit for transaction to complete)
+    await new Promise(resolve => setTimeout(resolve, 100)); // Small delay for transaction
+    
+    const verifyDeleted = await User.findById(userId);
+    if (verifyDeleted) {
+      console.error(`⚠️ WARNING: User ${userId} still exists after deletion attempt!`);
+      throw new Error('User deletion verification failed - user still exists');
+    }
+
+    console.log(`✅ Account deletion completed successfully for user: ${userId}`);
 
     res.status(200).json({
       success: true,
