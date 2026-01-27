@@ -194,6 +194,71 @@ const initializeSocket = (server) => {
     });
   });
 
+  /**
+   * Disconnect all sockets for a specific user (used during logout)
+   * This ensures complete session termination and prevents "zombie" connections
+   * @param {String} userId - User ID to disconnect all sockets for
+   * @returns {Object} Result object with disconnected count and success status
+   */
+  io.disconnectUser = (userId) => {
+    if (!userId) {
+      console.warn('⚠️ disconnectUser called without userId');
+      return { success: false, disconnectedCount: 0, error: 'userId is required' };
+    }
+
+    const userIdStr = userId.toString();
+    let disconnectedCount = 0;
+
+    try {
+      // Get the user's room
+      const userRoom = io.sockets.adapter.rooms.get(userIdStr);
+      
+      if (userRoom) {
+        // Get all socket IDs in the user's room
+        const socketIds = Array.from(userRoom);
+        
+        // Disconnect each socket explicitly
+        socketIds.forEach((socketId) => {
+          const socket = io.sockets.sockets.get(socketId);
+          if (socket) {
+            // Only disconnect if this socket belongs to the user
+            if (socket.userId && socket.userId.toString() === userIdStr) {
+              socket.disconnect(true); // Force disconnect
+              disconnectedCount++;
+              console.log(`🔌 Disconnected socket ${socketId} for user ${userIdStr} (logout)`);
+            }
+          }
+        });
+      }
+
+      // Remove from userSockets Map if it exists
+      if (userSockets.has(userIdStr)) {
+        userSockets.delete(userIdStr);
+        console.log(`🗑️ Removed user ${userIdStr} from userSockets Map (logout)`);
+      }
+
+      // Ensure the room is cleared (Socket.IO should handle this automatically, but we ensure it)
+      io.sockets.adapter.rooms.delete(userIdStr);
+
+      console.log(`✅ Logout cleanup complete for user ${userIdStr}: ${disconnectedCount} socket(s) disconnected`);
+      console.log(`📊 Total active users: ${userSockets.size}`);
+
+      return {
+        success: true,
+        disconnectedCount,
+        userId: userIdStr
+      };
+    } catch (error) {
+      console.error(`❌ Error disconnecting user ${userIdStr}:`, error);
+      return {
+        success: false,
+        disconnectedCount,
+        userId: userIdStr,
+        error: error.message
+      };
+    }
+  };
+
   return io;
 };
 

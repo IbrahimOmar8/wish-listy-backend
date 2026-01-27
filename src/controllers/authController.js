@@ -995,14 +995,32 @@ exports.updateProfileWithImage = async (req, res) => {
 // Logout user
 exports.logout = async (req, res) => {
   try {
-    // Remove FCM token to stop receiving push notifications
-    await removeFcmToken(req.user.id);
+    const userId = req.user.id;
+    
+    // Step 1: Remove FCM token to stop receiving push notifications
+    await removeFcmToken(userId);
+
+    // Step 2: Disconnect all Socket.IO connections for this user
+    // This ensures complete session termination and prevents "zombie" connections
+    const io = req.app.get('io');
+    if (io && typeof io.disconnectUser === 'function') {
+      const disconnectResult = io.disconnectUser(userId);
+      if (disconnectResult.success) {
+        console.log(`✅ Socket cleanup successful for user ${userId}: ${disconnectResult.disconnectedCount} socket(s) disconnected`);
+      } else {
+        console.warn(`⚠️ Socket cleanup warning for user ${userId}:`, disconnectResult.error);
+        // Don't fail logout if socket cleanup has issues, but log it
+      }
+    } else {
+      console.warn('⚠️ Socket.IO instance not available or disconnectUser method not found');
+    }
 
     res.status(200).json({
       success: true,
       message: req.t('auth.logout_success')
     });
   } catch (error) {
+    console.error('Logout error:', error);
     res.status(500).json({
       success: false,
       message: req.t('auth.logout_failed'),
