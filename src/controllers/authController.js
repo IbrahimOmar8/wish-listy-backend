@@ -544,14 +544,29 @@ exports.register = async (req, res) => {
     // Validate username format (must be a valid email or phone number)
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     const phoneRegex = /^\+?[0-9]{7,15}$/;
-    const isValidEmail = emailRegex.test(username);
-    const isValidPhone = phoneRegex.test(username.replace(/[\s\-()]/g, ''));
+    
+    // Normalize username first (for phone numbers, remove spaces, dashes, parentheses)
+    let normalizedUsername = username.trim();
+    const normalizedPhoneForValidation = normalizedUsername.replace(/[\s\-()]/g, '');
+    
+    const isValidEmail = emailRegex.test(normalizedUsername);
+    const isValidPhone = phoneRegex.test(normalizedPhoneForValidation);
     
     if (!isValidEmail && !isValidPhone) {
       return res.status(400).json({
         success: false,
         message: req.t('auth.username_format')
       });
+    }
+
+    // Normalize username for database storage and searching
+    // For emails: lowercase and trim
+    // For phones: remove spaces, dashes, parentheses, then lowercase
+    if (isValidEmail) {
+      normalizedUsername = normalizedUsername.toLowerCase();
+    } else if (isValidPhone) {
+      // Normalize phone: remove spaces, dashes, parentheses (matching Flutter normalizePhoneNumber)
+      normalizedUsername = normalizedPhoneForValidation.toLowerCase();
     }
 
     // Validate password
@@ -561,11 +576,8 @@ exports.register = async (req, res) => {
         message: req.t('auth.password_required')
       });
     }
-
-    // Normalize username for checking
-    const normalizedUsername = username.toLowerCase().trim();
     
-    // Check if user already exists
+    // Check if user already exists (using normalized username)
     const existingUser = await User.findOne({ username: normalizedUsername });
 
     // If user exists and is already verified, reject registration
@@ -590,12 +602,14 @@ exports.register = async (req, res) => {
       generatedHandle = null;
     }
 
-    // Detect if username is email or phone
+    // Detect if username is email or phone (using already normalized username)
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     const phoneRegex = /^\+?[0-9]{7,15}$/;
-    const normalizedPhone = normalizedUsername.replace(/[\s\-()]/g, '');
     const isEmail = emailRegex.test(normalizedUsername);
-    const isPhone = phoneRegex.test(normalizedPhone);
+    const isPhone = phoneRegex.test(normalizedUsername);
+    
+    // For phone, normalizedUsername is already normalized (spaces, dashes, parentheses removed)
+    const normalizedPhone = isPhone ? normalizedUsername : null;
 
     // Handle existing unverified user
     if (existingUser && existingUser.isVerified === false) {
