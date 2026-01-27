@@ -21,6 +21,27 @@ const getUnreadCountWithBadge = async (userId) => {
 };
 
 /**
+ * Helper function to check if a user has an active socket connection (is online)
+ * @param {String} userId - User ID to check
+ * @param {Object|null} socketIo - Socket.IO instance
+ * @returns {Boolean} True if user is online, false otherwise
+ */
+const isUserOnline = (userId, socketIo) => {
+  if (!socketIo || !userId) {
+    return false;
+  }
+  
+  try {
+    // Check if user's room exists (users join rooms with their userId as room name)
+    const roomName = userId.toString();
+    return socketIo.sockets.adapter.rooms.has(roomName);
+  } catch (error) {
+    console.error('Error checking user online status:', error);
+    return false;
+  }
+};
+
+/**
  * Create a notification and optionally emit Socket.IO event
  * @param {Object} options - Notification options
  * @param {String} options.recipientId - User ID who receives the notification
@@ -110,15 +131,15 @@ async function createNotification({
       await notification.populate('relatedUser', 'fullName username profileImage');
     }
 
-    // Calculate unread count with badge dismissal logic
+    // Calculate unread count with badge dismissal logic (once, reused for both Socket.IO and FCM)
     const unreadCount = await getUnreadCountWithBadge(recipientId);
+
+    // Check if user is online (has active socket connection)
+    const userIsOnline = isUserOnline(recipientId, socketIo);
 
     // Emit Socket.IO event if requested and socketIo is available
     if (emitSocketEvent && socketIo) {
       try {
-        // Calculate unread count with badge dismissal logic
-        const unreadCount = await getUnreadCountWithBadge(recipientId);
-
         // Emit to recipient's room
         socketIo.to(recipientId.toString()).emit('notification', {
           notification: notification.toObject(),
@@ -130,22 +151,65 @@ async function createNotification({
       }
     }
 
-    // Send push notification (for when app is in background/closed)
-    try {
-      await sendPushNotification(recipientId, {
-        title: title,
-        body: finalMessage,
-        data: {
-          type: type,
-          notificationId: notification._id.toString(),
-          relatedId: relatedId ? relatedId.toString() : '',
-          relatedWishlistId: relatedWishlistId ? relatedWishlistId.toString() : '',
-          unreadCount: unreadCount.toString(),
-        },
-      });
-    } catch (pushError) {
-      // Log push error but don't fail the notification creation
-      console.error('Push notification error:', pushError);
+    // Send push notification ONLY if user is offline (app is in background/closed)
+    // If user is online, they will receive the notification via Socket.IO
+    if (!userIsOnline) {
+      try {
+        // Prepare relatedUser object for FCM payload
+        // FCM data payload values must be strings, so we stringify the relatedUser object
+        let relatedUserString = '';
+        
+        if (notification.relatedUser && typeof notification.relatedUser === 'object') {
+          // Check if relatedUser is populated (has properties like fullName) vs just an ObjectId
+          if (notification.relatedUser.fullName !== undefined || notification.relatedUser.username !== undefined) {
+            // relatedUser is populated with user data, extract the needed fields
+            const relatedUserObj = {
+              id: notification.relatedUser._id ? notification.relatedUser._id.toString() : (senderId ? senderId.toString() : ''),
+              fullName: notification.relatedUser.fullName || '',
+              username: notification.relatedUser.username || '',
+              profileImage: notification.relatedUser.profileImage || ''
+            };
+            relatedUserString = JSON.stringify(relatedUserObj);
+          } else if (senderId) {
+            // relatedUser is an ObjectId (not populated), use senderId
+            const relatedUserObj = {
+              id: senderId.toString(),
+              fullName: '',
+              username: '',
+              profileImage: ''
+            };
+            relatedUserString = JSON.stringify(relatedUserObj);
+          }
+        } else if (senderId) {
+          // relatedUser is null or not an object, but senderId exists, create minimal object
+          const relatedUserObj = {
+            id: senderId.toString(),
+            fullName: '',
+            username: '',
+            profileImage: ''
+          };
+          relatedUserString = JSON.stringify(relatedUserObj);
+        }
+
+        await sendPushNotification(recipientId, {
+          title: title,
+          body: finalMessage,
+          data: {
+            type: type,
+            notificationId: notification._id.toString(),
+            relatedId: relatedId ? relatedId.toString() : '',
+            relatedWishlistId: relatedWishlistId ? relatedWishlistId.toString() : '',
+            relatedUser: relatedUserString,
+            unreadCount: unreadCount.toString(),
+          },
+        });
+      } catch (pushError) {
+        // Log push error but don't fail the notification creation
+        console.error('Push notification error:', pushError);
+      }
+    } else {
+      // User is online, skip FCM push notification
+      console.log(`User ${recipientId} is online - skipping FCM push notification`);
     }
 
     return notification;
@@ -158,5 +222,6 @@ async function createNotification({
 
 module.exports = {
   createNotification,
-  getUnreadCountWithBadge
+  getUnreadCountWithBadge,
+  isUserOnline
 };
