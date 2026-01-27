@@ -136,6 +136,14 @@ async function createNotification({
 
     // Check if user is online (has active socket connection)
     const userIsOnline = isUserOnline(recipientId, socketIo);
+    
+    // 🔍 DEBUG: User Online Status Check
+    console.log('═══════════════════════════════════════════════════════');
+    console.log('🔍 NOTIFICATION HELPER DEBUG');
+    console.log('👤 Recipient ID:', recipientId);
+    console.log('🌐 User Online Status:', userIsOnline ? '✅ ONLINE' : '❌ OFFLINE');
+    console.log('📊 Unread Count:', unreadCount);
+    console.log('═══════════════════════════════════════════════════════');
 
     // Emit Socket.IO event if requested and socketIo is available
     if (emitSocketEvent && socketIo) {
@@ -154,6 +162,7 @@ async function createNotification({
     // Send push notification ONLY if user is offline (app is in background/closed)
     // If user is online, they will receive the notification via Socket.IO
     if (!userIsOnline) {
+      console.log('📱 User is OFFLINE - Proceeding to send FCM Push Notification...');
       try {
         // Prepare relatedUser object for FCM payload
         // FCM data payload values must be strings, so we stringify the relatedUser object

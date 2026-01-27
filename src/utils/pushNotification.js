@@ -12,6 +12,10 @@ const User = require('../models/User');
  */
 const sendPushNotification = async (userId, notification) => {
   try {
+    console.log('═══════════════════════════════════════════════════════');
+    console.log('📲 FCM PUSH NOTIFICATION DEBUG');
+    console.log('👤 User ID being queried for token:', userId);
+    
     const messaging = getFirebaseMessaging();
 
     if (!messaging) {
@@ -24,8 +28,14 @@ const sendPushNotification = async (userId, notification) => {
 
     if (!user || !user.fcmToken) {
       console.log(`⚠️ No FCM token for user ${userId} - skipping push notification`);
+      console.log('🔍 User found:', user ? 'YES' : 'NO');
+      console.log('🔍 FCM Token exists:', user?.fcmToken ? 'YES' : 'NO');
       return null;
     }
+
+    // 🔍 DEBUG: Log the exact FCM token fetched
+    console.log('🔍 Fetched FCM Token:', user.fcmToken);
+    console.log('🔍 Token length:', user.fcmToken?.length || 0);
 
     const message = {
       token: user.fcmToken,
@@ -53,10 +63,25 @@ const sendPushNotification = async (userId, notification) => {
       },
     };
 
+    // 🔍 DEBUG: Log full message payload before sending
+    console.log('📦 Full FCM Message Payload:', JSON.stringify(message, null, 2));
+    console.log('🚀 Attempting to send FCM message...');
+
     const response = await messaging.send(message);
-    console.log(`✅ Push notification sent successfully to user ${userId}:`, response);
+    console.log('✅ FCM Success response:', JSON.stringify(response, null, 2));
+    console.log(`✅ Push notification sent successfully to user ${userId}`);
+    console.log('═══════════════════════════════════════════════════════');
     return response;
   } catch (error) {
+    // 🔍 DEBUG: Log FCM error details
+    console.log('═══════════════════════════════════════════════════════');
+    console.log('❌ FCM Error occurred');
+    console.log('👤 User ID:', userId);
+    console.log('❌ Error Code:', error.code || 'N/A');
+    console.log('❌ Error Message:', error.message);
+    console.log('❌ Full Error:', JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
+    console.log('═══════════════════════════════════════════════════════');
+    
     // Handle invalid token - remove it from user
     if (
       error.code === 'messaging/invalid-registration-token' ||

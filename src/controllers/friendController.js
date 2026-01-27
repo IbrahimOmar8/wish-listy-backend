@@ -70,6 +70,14 @@ exports.sendFriendRequest = async (req, res) => {
     await friendRequest.populate('from', '_id fullName username profileImage');
     await friendRequest.populate('to', '_id fullName username profileImage');
 
+    // 🚀 DEBUG: Friend Request Notification Flow
+    console.log('═══════════════════════════════════════════════════════');
+    console.log('🚀 FRIEND REQUEST NOTIFICATION DEBUG');
+    console.log('📤 From User ID:', fromUserId);
+    console.log('📥 To User ID (Recipient):', toUserId);
+    console.log('🆔 Friend Request ID:', friendRequest._id);
+    console.log('═══════════════════════════════════════════════════════');
+
     // Create notification for the receiver with dynamic localization
     // Note: relatedId (friendRequest._id) will be available as data.relatedId (requestId)
     //       and senderId (fromUserId) will be available as data.relatedUser._id (senderId)
