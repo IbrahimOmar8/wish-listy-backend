@@ -362,8 +362,28 @@ exports.verifyPasswordAndLogin = async (req, res) => {
       });
     }
 
-    // Find user by username
-    const user = await User.findOne({ username }).select('+password');
+    // Normalize username for database search (same as register function)
+    // For emails: lowercase and trim
+    // For phones: remove spaces, dashes, parentheses, then lowercase
+    let normalizedUsername = username.trim();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const phoneRegex = /^\+?[0-9]{7,15}$/;
+    const normalizedPhoneForValidation = normalizedUsername.replace(/[\s\-()]/g, '');
+    
+    const isValidEmail = emailRegex.test(normalizedUsername);
+    const isValidPhone = phoneRegex.test(normalizedPhoneForValidation);
+    
+    if (isValidEmail) {
+      normalizedUsername = normalizedUsername.toLowerCase();
+    } else if (isValidPhone) {
+      normalizedUsername = normalizedPhoneForValidation.toLowerCase();
+    } else {
+      // If neither email nor phone format, still normalize (lowercase and trim)
+      normalizedUsername = normalizedUsername.toLowerCase();
+    }
+
+    // Find user by normalized username
+    const user = await User.findOne({ username: normalizedUsername }).select('+password');
 
     if (!user) {
       return res.status(400).json({
@@ -384,11 +404,43 @@ exports.verifyPasswordAndLogin = async (req, res) => {
 
     // Check if user is verified
     if (!user.isVerified) {
-      return res.status(403).json({
-        success: false,
+      const verificationMethod = user.verificationMethod || 'email';
+      
+      // If verification method is email, generate and send new OTP
+      if (verificationMethod === 'email' && user.email) {
+        try {
+          // Generate new 6-digit OTP
+          const otp = Math.floor(100000 + Math.random() * 900000).toString();
+          const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+          // Update user with new OTP
+          await User.findByIdAndUpdate(user._id, {
+            otp: otp,
+            otpExpiresAt: otpExpiresAt
+          });
+
+          // Send OTP email
+          await sendRegistrationOTPEmail(user.email, otp, user.fullName);
+          console.log(`✅ Login OTP sent to ${user.email} for unverified user`);
+        } catch (emailError) {
+          console.error('Failed to send login OTP email:', emailError);
+          // Continue even if email fails - user can request new OTP via verify-otp endpoint
+        }
+      }
+
+      // Return response indicating verification is required (DO NOT return token)
+      return res.status(200).json({
+        success: true,
         message: req.t ? req.t('auth.account_not_verified') : 'Your account is not verified. Please verify your email or phone number.',
         requiresVerification: true,
-        verificationMethod: user.verificationMethod || 'email'
+        verificationMethod: verificationMethod,
+        user: {
+          id: user._id,
+          fullName: user.fullName,
+          username: user.username,
+          handle: user.handle,
+          isVerified: false
+        }
       });
     }
 
