@@ -31,6 +31,17 @@ exports.protect = async (req, res, next) => {
       });
     }
 
+    // Check if user is verified
+    // Note: verify-otp endpoint is not protected, so this check only applies to protected routes
+    if (!req.user.isVerified) {
+      return res.status(403).json({
+        success: false,
+        message: 'Your account is not verified. Please verify your email or phone number to access this feature.',
+        requiresVerification: true,
+        verificationMethod: req.user.verificationMethod || 'email'
+      });
+    }
+
     next();
   } catch (error) {
     return res.status(401).json({

@@ -9,6 +9,7 @@ const { uploadSingle } = require('../middleware/upload');
 // router.post('/verify-otp', authController.verifyOTPAndLogin);
 
 router.post('/register', authController.register);
+router.post('/verify-otp', authController.verifyOTP);
 router.post('/login', authController.verifyPasswordAndLogin);
 router.post('/check-account', authController.checkAccount);
 router.post('/request-reset', authController.requestPasswordReset);

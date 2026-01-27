@@ -101,6 +101,20 @@ const userSchema = new mongoose.Schema({
     type: Boolean,
     default: false
   },
+  verificationMethod: {
+    type: String,
+    enum: ['email', 'phone'],
+    default: null
+  },
+  otp: {
+    type: String,
+    default: null,
+    select: false // Don't include OTP in queries by default for security
+  },
+  otpExpiresAt: {
+    type: Date,
+    default: null
+  },
   friends: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'

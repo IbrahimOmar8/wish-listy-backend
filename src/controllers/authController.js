@@ -14,7 +14,7 @@ const bcrypt = require('bcryptjs');
 const { generateUniqueHandle } = require('../utils/handleGenerator');
 const { translateInterests } = require('../utils/interestsTranslator');
 const { isValidCountryCode, isValidDateFormat, isNotFutureDate } = require('../utils/validators');
-const { sendPasswordResetEmail } = require('../utils/email');
+const { sendPasswordResetEmail, sendRegistrationOTPEmail } = require('../utils/email');
 const { uploadProfileImage, deleteImage } = require('../config/cloudinary');
 const { updateFcmToken, removeFcmToken } = require('../utils/pushNotification');
 const fs = require('fs').promises;
@@ -382,6 +382,16 @@ exports.verifyPasswordAndLogin = async (req, res) => {
       });
     }
 
+    // Check if user is verified
+    if (!user.isVerified) {
+      return res.status(403).json({
+        success: false,
+        message: req.t ? req.t('auth.account_not_verified') : 'Your account is not verified. Please verify your email or phone number.',
+        requiresVerification: true,
+        verificationMethod: user.verificationMethod || 'email'
+      });
+    }
+
     // Update FCM token if provided (before generating token to ensure it's saved)
     if (fcmToken) {
       await User.findByIdAndUpdate(user._id, { fcmToken });
@@ -397,7 +407,8 @@ exports.verifyPasswordAndLogin = async (req, res) => {
         id: user._id,
         fullName: user.fullName,
         username: user.username,
-        profileImage: user.profileImage
+        profileImage: user.profileImage,
+        isVerified: user.isVerified
       }
     });
   } catch (error) {
@@ -405,6 +416,99 @@ exports.verifyPasswordAndLogin = async (req, res) => {
     res.status(500).json({
       success: false,
       message: req.t('common.server_error')
+    });
+  }
+};
+
+/**
+ * Verify OTP for email or phone verification
+ * POST /api/auth/verify-otp
+ * 
+ * Verifies the OTP code sent during registration and activates the user account
+ */
+exports.verifyOTP = async (req, res) => {
+  try {
+    const { username, otp } = req.body;
+
+    // Validation
+    if (!username || !otp) {
+      return res.status(400).json({
+        success: false,
+        message: req.t ? req.t('auth.username_otp_required') : 'Username and OTP code are required'
+      });
+    }
+
+    // Normalize username
+    const normalizedUsername = username.toLowerCase().trim();
+
+    // Find user with OTP field included
+    const user = await User.findOne({ username: normalizedUsername }).select('+otp');
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: req.t ? req.t('auth.user_not_found') : 'User not found'
+      });
+    }
+
+    // Check if user is already verified
+    if (user.isVerified) {
+      return res.status(400).json({
+        success: false,
+        message: req.t ? req.t('auth.already_verified') : 'Account is already verified'
+      });
+    }
+
+    // Check if OTP exists
+    if (!user.otp) {
+      return res.status(400).json({
+        success: false,
+        message: req.t ? req.t('auth.no_otp_found') : 'No verification code found. Please request a new one.'
+      });
+    }
+
+    // Check if OTP is expired
+    if (user.otpExpiresAt && new Date() > user.otpExpiresAt) {
+      return res.status(400).json({
+        success: false,
+        message: req.t ? req.t('auth.otp_expired') : 'Verification code has expired. Please request a new one.'
+      });
+    }
+
+    // Verify OTP
+    if (user.otp !== otp) {
+      return res.status(400).json({
+        success: false,
+        message: req.t ? req.t('auth.invalid_otp') : 'Invalid verification code'
+      });
+    }
+
+    // OTP is valid - verify the user
+    user.isVerified = true;
+    user.otp = null; // Clear OTP after successful verification
+    user.otpExpiresAt = null;
+    await user.save();
+
+    // Generate token for verified user
+    const token = generateToken(user._id);
+
+    res.status(200).json({
+      success: true,
+      message: req.t ? req.t('auth.verification_success') : 'Account verified successfully!',
+      token,
+      user: {
+        id: user._id,
+        fullName: user.fullName,
+        username: user.username,
+        handle: user.handle,
+        isVerified: true
+      }
+    });
+  } catch (error) {
+    console.error('Verify OTP Error:', error);
+    res.status(500).json({
+      success: false,
+      message: req.t ? req.t('common.server_error') : 'Server error'
     });
   }
 };
@@ -482,26 +586,98 @@ exports.register = async (req, res) => {
       generatedHandle = null;
     }
 
-    // Create new user
-    const user = await User.create({
+    // Detect if username is email or phone
+    const normalizedUsername = username.toLowerCase().trim();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const phoneRegex = /^\+?[0-9]{7,15}$/;
+    const normalizedPhone = normalizedUsername.replace(/[\s\-()]/g, '');
+    const isEmail = emailRegex.test(normalizedUsername);
+    const isPhone = phoneRegex.test(normalizedPhone);
+
+    // Prepare user data
+    const userData = {
       fullName: fullName.trim(),
-      username: username.toLowerCase().trim(),
+      username: normalizedUsername,
       handle: generatedHandle,
       password: hashedPassword,
-      isVerified: true
-    });
+      isVerified: false // User must verify before accessing protected routes
+    };
 
-    const token = generateToken(user._id);
+    // Handle email registration
+    if (isEmail) {
+      // Generate 6-digit OTP
+      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
-    res.status(201).json({
-      success: true,
-      token,
-      user: {
-        id: user._id,
-        fullName: user.fullName,
-        username: user.username,
-        handle: user.handle
+      userData.email = normalizedUsername;
+      userData.verificationMethod = 'email';
+      userData.otp = otp;
+      userData.otpExpiresAt = otpExpiresAt;
+
+      // Create user first
+      const user = await User.create(userData);
+
+      // Send OTP email
+      try {
+        await sendRegistrationOTPEmail(user.email, otp, user.fullName);
+        console.log(`✅ Registration OTP sent to ${user.email}`);
+      } catch (emailError) {
+        console.error('Failed to send registration OTP email:', emailError);
+        // Delete user if email sending fails
+        await User.findByIdAndDelete(user._id);
+        return res.status(500).json({
+          success: false,
+          message: req.t ? req.t('auth.email_send_failed') : 'Failed to send verification email. Please try again.'
+        });
       }
+
+      // Don't return token - user must verify OTP first
+      res.status(201).json({
+        success: true,
+        message: req.t ? req.t('auth.registration_success_verify_email') : 'Registration successful! Please check your email for verification code.',
+        requiresVerification: true,
+        verificationMethod: 'email',
+        user: {
+          id: user._id,
+          fullName: user.fullName,
+          username: user.username,
+          handle: user.handle,
+          isVerified: false
+        }
+      });
+      return;
+    }
+
+    // Handle phone registration
+    if (isPhone) {
+      userData.phone = normalizedPhone;
+      userData.verificationMethod = 'phone';
+      // Note: Firebase will handle SMS OTP on the frontend
+      // We just mark the user as unverified
+
+      const user = await User.create(userData);
+
+      // Don't return token - user must verify via Firebase on frontend
+      res.status(201).json({
+        success: true,
+        message: req.t ? req.t('auth.registration_success_verify_phone') : 'Registration successful! Please verify your phone number.',
+        requiresVerification: true,
+        verificationMethod: 'phone',
+        user: {
+          id: user._id,
+          fullName: user.fullName,
+          username: user.username,
+          handle: user.handle,
+          isVerified: false
+        }
+      });
+      return;
+    }
+
+    // Should not reach here due to validation above, but just in case
+    return res.status(400).json({
+      success: false,
+      message: req.t('auth.username_format')
     });
   } catch (error) {
     console.error('Register Error:', error);
