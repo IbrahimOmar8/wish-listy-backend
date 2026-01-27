@@ -562,10 +562,14 @@ exports.register = async (req, res) => {
       });
     }
 
+    // Normalize username for checking
+    const normalizedUsername = username.toLowerCase().trim();
+    
     // Check if user already exists
-    const existingUser = await User.findOne({ username: username.toLowerCase() });
+    const existingUser = await User.findOne({ username: normalizedUsername });
 
-    if (existingUser) {
+    // If user exists and is already verified, reject registration
+    if (existingUser && existingUser.isVerified === true) {
       return res.status(400).json({
         success: false,
         message: req.t('auth.username_exists')
@@ -587,14 +591,100 @@ exports.register = async (req, res) => {
     }
 
     // Detect if username is email or phone
-    const normalizedUsername = username.toLowerCase().trim();
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     const phoneRegex = /^\+?[0-9]{7,15}$/;
     const normalizedPhone = normalizedUsername.replace(/[\s\-()]/g, '');
     const isEmail = emailRegex.test(normalizedUsername);
     const isPhone = phoneRegex.test(normalizedPhone);
 
-    // Prepare user data
+    // Handle existing unverified user
+    if (existingUser && existingUser.isVerified === false) {
+      // Update user information (fullName and password can be changed)
+      existingUser.fullName = fullName.trim();
+      existingUser.password = hashedPassword;
+      
+      // Generate unique handle if not already set
+      if (!existingUser.handle) {
+        try {
+          existingUser.handle = await generateUniqueHandle(fullName);
+          console.log(`Generated handle for existing unverified user: ${existingUser.handle}`);
+        } catch (handleError) {
+          console.error('Error generating handle:', handleError);
+          // Continue without handle
+        }
+      }
+
+      // Handle email registration for existing unverified user
+      if (isEmail) {
+        // Generate new 6-digit OTP
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+        existingUser.email = normalizedUsername;
+        existingUser.verificationMethod = 'email';
+        existingUser.otp = otp;
+        existingUser.otpExpiresAt = otpExpiresAt;
+
+        // Save updated user
+        await existingUser.save();
+
+        // Send OTP email
+        try {
+          await sendRegistrationOTPEmail(existingUser.email, otp, existingUser.fullName);
+          console.log(`✅ Registration OTP resent to ${existingUser.email}`);
+        } catch (emailError) {
+          console.error('Failed to send registration OTP email:', emailError);
+          return res.status(500).json({
+            success: false,
+            message: req.t ? req.t('auth.email_send_failed') : 'Failed to send verification email. Please try again.'
+          });
+        }
+
+        // Return same format as new registration
+        res.status(201).json({
+          success: true,
+          message: req.t ? req.t('auth.registration_success_verify_email') : 'Registration successful! Please check your email for verification code.',
+          requiresVerification: true,
+          verificationMethod: 'email',
+          user: {
+            id: existingUser._id,
+            fullName: existingUser.fullName,
+            username: existingUser.username,
+            handle: existingUser.handle,
+            isVerified: false
+          }
+        });
+        return;
+      }
+
+      // Handle phone registration for existing unverified user
+      if (isPhone) {
+        existingUser.phone = normalizedPhone;
+        existingUser.verificationMethod = 'phone';
+        // Note: Firebase will handle SMS OTP on the frontend
+
+        // Save updated user
+        await existingUser.save();
+
+        // Return same format as new registration
+        res.status(201).json({
+          success: true,
+          message: req.t ? req.t('auth.registration_success_verify_phone') : 'Registration successful! Please verify your phone number.',
+          requiresVerification: true,
+          verificationMethod: 'phone',
+          user: {
+            id: existingUser._id,
+            fullName: existingUser.fullName,
+            username: existingUser.username,
+            handle: existingUser.handle,
+            isVerified: false
+          }
+        });
+        return;
+      }
+    }
+
+    // Prepare user data for new registration
     const userData = {
       fullName: fullName.trim(),
       username: normalizedUsername,
@@ -603,7 +693,7 @@ exports.register = async (req, res) => {
       isVerified: false // User must verify before accessing protected routes
     };
 
-    // Handle email registration
+    // Handle email registration (new user)
     if (isEmail) {
       // Generate 6-digit OTP
       const otp = Math.floor(100000 + Math.random() * 900000).toString();
@@ -648,7 +738,7 @@ exports.register = async (req, res) => {
       return;
     }
 
-    // Handle phone registration
+    // Handle phone registration (new user)
     if (isPhone) {
       userData.phone = normalizedPhone;
       userData.verificationMethod = 'phone';
