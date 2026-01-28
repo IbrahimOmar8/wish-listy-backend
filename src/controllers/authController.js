@@ -589,18 +589,21 @@ exports.verifyOTP = async (req, res) => {
  */
 exports.verifySuccess = async (req, res) => {
   try {
-    const { userId } = req.body;
+    // Extract userId from request body (Flutter sends 'userId' field)
+    // Also support 'id' and 'user_id' for flexibility
+    const { userId, id, user_id } = req.body;
+    const extractedUserId = userId || id || user_id;
 
     // Validation: userId is required
-    if (!userId) {
+    if (!extractedUserId) {
       return res.status(400).json({
         success: false,
-        message: 'User ID is required'
+        message: 'User ID is required. Please provide userId in the request body.'
       });
     }
 
     // Validate userId format (must be valid ObjectId)
-    if (!mongoose.Types.ObjectId.isValid(userId)) {
+    if (!mongoose.Types.ObjectId.isValid(extractedUserId)) {
       return res.status(400).json({
         success: false,
         message: 'Invalid user ID format'
@@ -608,7 +611,7 @@ exports.verifySuccess = async (req, res) => {
     }
 
     // Find user by userId
-    const user = await User.findById(userId);
+    const user = await User.findById(extractedUserId);
 
     if (!user) {
       return res.status(404).json({
@@ -618,10 +621,23 @@ exports.verifySuccess = async (req, res) => {
     }
 
     // Check if user is already verified
+    // If already verified, return success response (frontend can handle gracefully)
     if (user.isVerified) {
-      return res.status(400).json({
-        success: false,
-        message: 'Account is already verified'
+      // Generate token for already verified user
+      const token = generateToken(user._id);
+      
+      return res.status(200).json({
+        success: true,
+        message: 'Account is already verified',
+        alreadyVerified: true,
+        token,
+        user: {
+          id: user._id,
+          fullName: user.fullName,
+          username: user.username,
+          handle: user.handle,
+          isVerified: true
+        }
       });
     }
 
