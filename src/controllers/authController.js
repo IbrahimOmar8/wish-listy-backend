@@ -431,9 +431,9 @@ exports.verifyPasswordAndLogin = async (req, res) => {
       }
 
       // Return response indicating verification is required (DO NOT return token)
-      return res.status(200).json({
-        success: true,
-        message: req.t ? req.t('auth.account_not_verified') : 'Your account is not verified. Please verify your email or phone number.',
+      return res.status(401).json({
+        success: false,
+        message: 'You already have an unverified account',
         requiresVerification: true,
         verificationMethod: verificationMethod,
         user: {
@@ -492,10 +492,23 @@ exports.verifyOTP = async (req, res) => {
       });
     }
 
-    // Normalize username
-    const normalizedUsername = username.toLowerCase().trim();
+    // Normalize username (same logic as register/login: supports email or phone)
+    let normalizedUsername = username.trim();
+    const normalizedPhoneForValidation = normalizedUsername.replace(/[\s\-()]/g, '');
 
-    // Find user with OTP field included
+    const isValidEmail = emailRegex.test(normalizedUsername);
+    const isValidPhone = phoneRegex.test(normalizedPhoneForValidation);
+
+    if (isValidEmail) {
+      normalizedUsername = normalizedUsername.toLowerCase();
+    } else if (isValidPhone) {
+      normalizedUsername = normalizedPhoneForValidation.toLowerCase();
+    } else {
+      // Fallback: lowercase + trim
+      normalizedUsername = normalizedUsername.toLowerCase();
+    }
+
+    // Find user with OTP field included using normalized username
     const user = await User.findOne({ username: normalizedUsername }).select('+otp');
 
     if (!user) {
@@ -560,6 +573,81 @@ exports.verifyOTP = async (req, res) => {
     });
   } catch (error) {
     console.error('Verify OTP Error:', error);
+    res.status(500).json({
+      success: false,
+      message: req.t ? req.t('common.server_error') : 'Server error'
+    });
+  }
+};
+
+/**
+ * Verify Success API
+ * POST /api/auth/verify-success
+ * 
+ * Marks user as verified after Firebase OTP verification on frontend.
+ * This endpoint is called after the frontend successfully verifies OTP via Firebase.
+ */
+exports.verifySuccess = async (req, res) => {
+  try {
+    const { userId } = req.body;
+
+    // Validation: userId is required
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'User ID is required'
+      });
+    }
+
+    // Validate userId format (must be valid ObjectId)
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid user ID format'
+      });
+    }
+
+    // Find user by userId
+    const user = await User.findById(userId);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Check if user is already verified
+    if (user.isVerified) {
+      return res.status(400).json({
+        success: false,
+        message: 'Account is already verified'
+      });
+    }
+
+    // Update user: set isVerified to true and clear OTP fields
+    user.isVerified = true;
+    user.otp = null;
+    user.otpExpiresAt = null;
+    await user.save();
+
+    // Generate JWT token for verified user
+    const token = generateToken(user._id);
+
+    res.status(200).json({
+      success: true,
+      message: 'Account verified successfully',
+      token,
+      user: {
+        id: user._id,
+        fullName: user.fullName,
+        username: user.username,
+        handle: user.handle,
+        isVerified: true
+      }
+    });
+  } catch (error) {
+    console.error('Verify Success Error:', error);
     res.status(500).json({
       success: false,
       message: req.t ? req.t('common.server_error') : 'Server error'
@@ -1551,15 +1639,25 @@ const deleteUserAccount = async (userId) => {
     // Step 13.5: Delete PasswordResetToken records for this user
     await PasswordResetToken.deleteMany({ user: userId }).session(session);
 
-    // Step 14: Delete profile images from storage (if applicable)
-    // Note: This is a placeholder. Implement actual file deletion if using
-    // AWS S3, Firebase Storage, or other cloud storage services.
-    // Example:
-    // if (profileImageUrl) {
-    //   await deleteFileFromStorage(profileImageUrl);
-    // }
-    // For now, profile images stored as URLs will be orphaned.
-    // Implement cloud storage deletion if you're using S3/Firebase/etc.
+    // Step 14: Delete profile image from Cloudinary (if exists)
+    if (profileImageUrl) {
+      try {
+        // Extract public_id from Cloudinary URL
+        // URL format: https://res.cloudinary.com/<cloud_name>/image/upload/v123456/wishlisty/profiles/<public_id>.<ext>
+        const urlParts = profileImageUrl.split('/');
+        const fileWithExt = urlParts[urlParts.length - 1];
+        const publicId = `wishlisty/profiles/${fileWithExt.split('.')[0]}`;
+
+        await deleteImage(publicId).catch(() => {
+          // Ignore error if image doesn't exist in Cloudinary
+        });
+
+        console.log(`🧹 Profile image deleted from Cloudinary: ${publicId}`);
+      } catch (imageDeleteError) {
+        console.error('Error deleting profile image from Cloudinary during account deletion:', imageDeleteError);
+        // لا نفشل الترانزاكشن بسبب صورة فقط، نكمل الحذف لباقي الداتا
+      }
+    }
 
     // Step 15: Finally, delete the User record
     const deleteResult = await User.findByIdAndDelete(userId).session(session);
