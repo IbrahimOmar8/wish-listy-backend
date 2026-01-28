@@ -21,6 +21,10 @@ const fs = require('fs').promises;
 const path = require('path');
 const os = require('os');
 
+// Regex patterns for username validation (email/phone)
+const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const phoneRegex = /^\+?[0-9]{7,15}$/;
+
 /**
  * Request Password Reset API
  * POST /api/auth/request-reset
@@ -366,8 +370,6 @@ exports.verifyPasswordAndLogin = async (req, res) => {
     // For emails: lowercase and trim
     // For phones: remove spaces, dashes, parentheses, then lowercase
     let normalizedUsername = username.trim();
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    const phoneRegex = /^\+?[0-9]{7,15}$/;
     const normalizedPhoneForValidation = normalizedUsername.replace(/[\s\-()]/g, '');
     
     const isValidEmail = emailRegex.test(normalizedUsername);
@@ -594,9 +596,6 @@ exports.register = async (req, res) => {
     }
 
     // Validate username format (must be a valid email or phone number)
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    const phoneRegex = /^\+?[0-9]{7,15}$/;
-    
     // Normalize username first (for phone numbers, remove spaces, dashes, parentheses)
     let normalizedUsername = username.trim();
     const normalizedPhoneForValidation = normalizedUsername.replace(/[\s\-()]/g, '');
