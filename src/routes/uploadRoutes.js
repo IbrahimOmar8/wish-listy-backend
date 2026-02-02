@@ -12,8 +12,9 @@ const {
 // All routes require authentication
 router.use(protect);
 
-// Upload profile image (multipart/form-data)
-router.post('/profile', uploadSingle('image'), uploadProfileImage);
+// Profile image: POST for initial upload, PUT for editing (field name 'profileImage' for both)
+router.post('/profile', uploadSingle('profileImage'), uploadProfileImage);
+router.put('/profile', uploadSingle('profileImage'), uploadProfileImage);
 
 // Upload item image (multipart/form-data)
 router.post('/item/:itemId', uploadSingle('image'), uploadItemImage);

@@ -46,6 +46,12 @@ const uploadSingle = (fieldName) => {
             message: 'File size too large. Maximum size is 5MB.',
           });
         }
+        if (err.code === 'LIMIT_UNEXPECTED_FILE') {
+          return res.status(400).json({
+            success: false,
+            message: `Unexpected form field. Use the field name '${fieldName}' for the image file.`,
+          });
+        }
         return res.status(400).json({
           success: false,
           message: `Upload error: ${err.message}`,
@@ -53,7 +59,7 @@ const uploadSingle = (fieldName) => {
       } else if (err) {
         return res.status(400).json({
           success: false,
-          message: err.message,
+          message: err.message || 'Upload failed',
         });
       }
       next();

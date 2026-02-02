@@ -1,4 +1,4 @@
-const { uploadProfileImage, uploadItemImage, deleteImage } = require('../config/cloudinary');
+const { uploadProfileImage: uploadToCloudinary, uploadItemImage, deleteImage } = require('../config/cloudinary');
 const User = require('../models/User');
 const Item = require('../models/Item');
 const fs = require('fs').promises;
@@ -8,29 +8,32 @@ const os = require('os');
 /**
  * Upload profile image
  * POST /api/upload/profile
+ * Expects multipart field name: profileImage
+ * Always returns valid JSON; 200 with { success: true, imageUrl } on success.
  */
 exports.uploadProfileImage = async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({
         success: false,
-        message: 'No image file provided',
+        message: 'No image file provided. Send the image with field name "profileImage".',
       });
     }
 
-    // Create temporary file from buffer
+    // Create temporary file from buffer (Multer uses memoryStorage)
     const tempFilePath = path.join(
       os.tmpdir(),
-      `profile-${Date.now()}-${req.file.originalname}`
+      `profile-${Date.now()}-${req.file.originalname || 'image'}`
     );
 
     await fs.writeFile(tempFilePath, req.file.buffer);
 
-    // Upload to Cloudinary
-    const result = await uploadProfileImage(tempFilePath);
-
-    // Delete temporary file
-    await fs.unlink(tempFilePath).catch(() => {});
+    let result;
+    try {
+      result = await uploadToCloudinary(tempFilePath);
+    } finally {
+      await fs.unlink(tempFilePath).catch(() => {});
+    }
 
     // Update user's profile image in database
     const user = await User.findByIdAndUpdate(
@@ -39,16 +42,14 @@ exports.uploadProfileImage = async (req, res) => {
       { new: true }
     ).select('fullName username profileImage');
 
-    // Delete old image from Cloudinary if exists
-    // Extract public_id from old URL and delete
-    // (Optional: implement if you want to clean up old images)
-
+    // Always return 200 OK with valid JSON on success
     return res.status(200).json({
       success: true,
+      imageUrl: result.url,
       message: 'Profile image uploaded successfully',
       data: {
         imageUrl: result.url,
-        user: user,
+        user,
       },
     });
   } catch (error) {
