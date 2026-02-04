@@ -530,6 +530,7 @@ exports.verifyOTP = async (req, res) => {
     if (!user.otp) {
       return res.status(400).json({
         success: false,
+        errorCode: 'OTP_NOT_FOUND',
         message: req.t ? req.t('auth.no_otp_found') : 'No verification code found. Please request a new one.'
       });
     }
@@ -538,14 +539,18 @@ exports.verifyOTP = async (req, res) => {
     if (user.otpExpiresAt && new Date() > user.otpExpiresAt) {
       return res.status(400).json({
         success: false,
+        errorCode: 'OTP_EXPIRED',
         message: req.t ? req.t('auth.otp_expired') : 'Verification code has expired. Please request a new one.'
       });
     }
 
-    // Verify OTP
-    if (user.otp !== otp) {
+    // Verify OTP (string normalization: trim and compare as strings to avoid number vs string mismatch)
+    const storedOtp = String(user.otp || '').trim();
+    const receivedOtp = String(otp ?? '').trim();
+    if (storedOtp !== receivedOtp) {
       return res.status(400).json({
         success: false,
+        errorCode: 'OTP_INVALID',
         message: req.t ? req.t('auth.invalid_otp') : 'Invalid verification code'
       });
     }
@@ -581,9 +586,112 @@ exports.verifyOTP = async (req, res) => {
 };
 
 /**
+ * Resend OTP API
+ * POST /api/auth/resend-otp
+ *
+ * Sends a new verification code to an unverified user (email or phone).
+ * Use cases:
+ * - New user just registered: tap "Resend OTP" on verify screen.
+ * - User registered, left, came back and logged in: redirect to OTP screen; login already sent new OTP; user can also tap "Resend OTP" for another code.
+ * Body: { username } (email or phone, same as login/register).
+ */
+exports.resendOTP = async (req, res) => {
+  try {
+    const { username } = req.body;
+
+    if (!username || typeof username !== 'string' || !username.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: req.t ? req.t('auth.username_required') : 'Username (email or phone) is required'
+      });
+    }
+
+    // Normalize username (same logic as register / verifyOTP)
+    let normalizedUsername = username.trim();
+    const normalizedPhoneForValidation = normalizedUsername.replace(/[\s\-()]/g, '');
+    const isValidEmail = emailRegex.test(normalizedUsername);
+    const isValidPhone = phoneRegex.test(normalizedPhoneForValidation);
+
+    if (!isValidEmail && !isValidPhone) {
+      return res.status(400).json({
+        success: false,
+        message: req.t ? req.t('auth.username_format') : 'Username must be a valid email or phone number'
+      });
+    }
+
+    if (isValidEmail) {
+      normalizedUsername = normalizedUsername.toLowerCase();
+    } else if (isValidPhone) {
+      normalizedUsername = normalizedPhoneForValidation.toLowerCase();
+    } else {
+      normalizedUsername = normalizedUsername.toLowerCase();
+    }
+
+    const user = await User.findOne({ username: normalizedUsername });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: req.t ? req.t('auth.user_not_found') : 'User not found'
+      });
+    }
+
+    if (user.isVerified) {
+      return res.status(400).json({
+        success: false,
+        message: req.t ? req.t('auth.already_verified') : 'Account is already verified'
+      });
+    }
+
+    const verificationMethod = user.verificationMethod || 'email';
+
+    if (verificationMethod === 'email' && (user.email || user.username)) {
+      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+      await User.findByIdAndUpdate(user._id, {
+        otp,
+        otpExpiresAt
+      });
+
+      try {
+        const emailToUse = user.email || user.username;
+        await sendRegistrationOTPEmail(emailToUse, otp, user.fullName);
+        console.log(`✅ Resend OTP sent to ${emailToUse}`);
+      } catch (emailError) {
+        console.error('Resend OTP email error:', emailError);
+        return res.status(500).json({
+          success: false,
+          message: req.t ? req.t('auth.email_send_failed') : 'Failed to send verification email. Please try again.'
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: req.t ? req.t('auth.otp_resent') : 'Verification code sent to your email.',
+        verificationMethod: 'email'
+      });
+    }
+
+    // Phone: backend does not send SMS (Firebase handles on frontend). Return success so client can trigger Firebase resend.
+    return res.status(200).json({
+      success: true,
+      message: req.t ? req.t('auth.otp_resent_phone') : 'Please request a new code from the app.',
+      verificationMethod: 'phone'
+    });
+  } catch (error) {
+    console.error('Resend OTP Error:', error);
+    res.status(500).json({
+      success: false,
+      message: req.t ? req.t('common.server_error') : 'Server error'
+    });
+  }
+};
+
+/**
  * Verify Success API
  * POST /api/auth/verify-success
- * 
+ *
  * Marks user as verified after Firebase OTP verification on frontend.
  * This endpoint is called after the frontend successfully verifies OTP via Firebase.
  */
