@@ -1,10 +1,11 @@
 const Wishlist = require('../models/Wishlist');
 const Item = require('../models/Item');
 const Reservation = require('../models/Reservation');
+const mongoose = require('mongoose');
 
 exports.createWishlist = async (req, res) => {
   try {
-    const { name, description, privacy, category } = req.body;
+    const { name, privacy, category, items } = req.body;
 
     if (!name) {
       return res.status(400).json({
@@ -13,24 +14,121 @@ exports.createWishlist = async (req, res) => {
       });
     }
 
-    const wishlist = await Wishlist.create({
-      name,
-      description: description || '',
-      privacy: privacy || 'private',
-      category: category || 'general',
-      owner: req.user.id,
-      items: [] // Ensure starting with empty array
-    });
+    // If items array exists and has items, use transaction
+    if (items && Array.isArray(items) && items.length > 0) {
+      const session = await mongoose.startSession();
+      
+      try {
+        session.startTransaction();
 
-    res.status(201).json({
-      success: true,
-      wishlist
-    });
+        // Validate items before creating wishlist
+        for (let i = 0; i < items.length; i++) {
+          const item = items[i];
+          
+          if (!item.name || typeof item.name !== 'string' || item.name.trim().length === 0) {
+            await session.abortTransaction();
+            await session.endSession();
+            return res.status(400).json({
+              success: false,
+              message: `Item at index ${i}: name is required and must be a non-empty string`
+            });
+          }
+
+          // Validate priority if provided
+          if (item.priority && !['low', 'medium', 'high'].includes(item.priority)) {
+            await session.abortTransaction();
+            await session.endSession();
+            return res.status(400).json({
+              success: false,
+              message: `Item at index ${i}: priority must be 'low', 'medium', or 'high'`
+            });
+          }
+        }
+
+        // Create wishlist within transaction
+        const wishlist = await Wishlist.create([{
+          name,
+          privacy: privacy || 'private',
+          category: category || 'general',
+          owner: req.user.id,
+          items: []
+        }], { session });
+
+        const createdWishlist = wishlist[0];
+        const createdItems = [];
+
+        // Create items within transaction
+        for (const itemData of items) {
+          const item = await Item.create([{
+            name: itemData.name.trim(),
+            description: itemData.description ? itemData.description.trim() : null,
+            wishlist: createdWishlist._id,
+            priority: itemData.priority || 'medium',
+            url: itemData.url || null,
+            storeName: itemData.storeName || null,
+            storeLocation: itemData.storeLocation || null
+          }], { session });
+
+          createdItems.push(item[0]);
+
+          // Add item to wishlist's items array
+          await Wishlist.findByIdAndUpdate(
+            createdWishlist._id,
+            { $push: { items: item[0]._id } },
+            { session }
+          );
+        }
+
+        // Commit transaction
+        await session.commitTransaction();
+        await session.endSession();
+
+        // Populate wishlist with items before returning
+        const populatedWishlist = await Wishlist.findById(createdWishlist._id)
+          .populate('items')
+          .populate('owner', 'fullName username profileImage');
+
+        return res.status(201).json({
+          success: true,
+          wishlist: populatedWishlist,
+          itemsCreated: createdItems.length
+        });
+      } catch (transactionError) {
+        // Abort transaction on error
+        if (session.inTransaction()) {
+          await session.abortTransaction();
+        }
+        await session.endSession();
+        throw transactionError; // Re-throw to be caught by outer catch
+      }
+    } else {
+      // No items array or empty array - create wishlist normally (backward compatible)
+      const wishlist = await Wishlist.create({
+        name,
+        privacy: privacy || 'private',
+        category: category || 'general',
+        owner: req.user.id,
+        items: []
+      });
+
+      // Populate owner before returning
+      const populatedWishlist = await Wishlist.findById(wishlist._id)
+        .populate('owner', 'fullName username profileImage');
+
+      res.status(201).json({
+        success: true,
+        wishlist: populatedWishlist,
+        itemsCreated: 0
+      });
+    }
   } catch (error) {
+    // Note: session cleanup is handled in the transaction block above
+
     console.error('Create Wishlist Error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to create wishlist'
+      message: 'Failed to create wishlist',
+      error: error.message
     });
   }
 };
