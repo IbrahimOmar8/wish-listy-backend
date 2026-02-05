@@ -212,6 +212,16 @@ exports.respondToFriendRequest = async (req, res) => {
         socketIo: req.app.get('io')
       });
 
+      // Clear "friend request" notification for receiver so red dot updates
+      await Notification.updateMany(
+        { type: 'friend_request', relatedId: friendRequest._id, user: friendRequest.to._id },
+        { isRead: true }
+      );
+      const receiverUnreadCount = await getUnreadCountWithBadge(friendRequest.to._id);
+      if (req.app.get('io')) {
+        req.app.get('io').to(friendRequest.to._id.toString()).emit('unread_count_update', { unreadCount: receiverUnreadCount });
+      }
+
       res.status(200).json({
         success: true,
         message: 'Friend request accepted',
@@ -224,6 +234,16 @@ exports.respondToFriendRequest = async (req, res) => {
 
       // Note: No notification created for rejected requests (by design)
       // Only Socket.IO event is sent for real-time updates
+
+      // Clear "friend request" notification for receiver so red dot updates
+      await Notification.updateMany(
+        { type: 'friend_request', relatedId: friendRequest._id, user: friendRequest.to._id },
+        { isRead: true }
+      );
+      const receiverUnreadCount = await getUnreadCountWithBadge(friendRequest.to._id);
+      if (req.app.get('io')) {
+        req.app.get('io').to(friendRequest.to._id.toString()).emit('unread_count_update', { unreadCount: receiverUnreadCount });
+      }
 
       // Calculate sender's current unreadCount with badge dismissal logic (for consistency, even though no notification was created)
       const unreadCount = await getUnreadCountWithBadge(friendRequest.from._id);
@@ -595,6 +615,8 @@ exports.cancelFriendRequest = async (req, res) => {
         requestId: requestId,
         message: 'Friend request was cancelled'
       });
+      const receiverUnreadCount = await getUnreadCountWithBadge(friendRequest.to);
+      req.app.get('io').to(friendRequest.to.toString()).emit('unread_count_update', { unreadCount: receiverUnreadCount });
     }
 
     res.status(200).json({
