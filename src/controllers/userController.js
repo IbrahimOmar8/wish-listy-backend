@@ -43,8 +43,10 @@ exports.searchUsers = async (req, res) => {
       { username: { $regex: escapedValue, $options: 'i' } }
     ];
 
-    // Exclude current user from search results
-    searchQuery._id = { $ne: currentUserId };
+    // Load current user to exclude self and blocked users from search
+    const currentUser = await User.findById(currentUserId).select('friends blockedUsers');
+    const blockedIds = (currentUser && currentUser.blockedUsers) ? currentUser.blockedUsers : [];
+    searchQuery._id = { $nin: [currentUserId, ...blockedIds] };
 
     // Search users and return safe fields only
     // INDEXING RECOMMENDATION: For optimal performance, ensure indexes exist on:
@@ -57,9 +59,8 @@ exports.searchUsers = async (req, res) => {
       .select('_id fullName username handle profileImage friends')
       .limit(20);
 
-    // Get current user's friends list and friend requests
-    const currentUser = await User.findById(currentUserId).select('friends');
-    const friendIds = currentUser.friends.map(f => f.toString());
+    // Use current user's friends list (already loaded above)
+    const friendIds = (currentUser && currentUser.friends) ? currentUser.friends.map(f => f.toString()) : [];
 
     // Get all pending friend requests involving current user
     const userIds = users.map(u => u._id.toString());

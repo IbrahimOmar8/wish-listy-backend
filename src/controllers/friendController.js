@@ -279,8 +279,8 @@ exports.getMyFriends = async (req, res) => {
     const userId = req.user.id;
     const { limit = 100, page = 1 } = req.query;
 
-    // Get current user to access friends array
-    const currentUser = await User.findById(userId).select('friends');
+    // Get current user to access friends array; exclude blocked users from friends list
+    const currentUser = await User.findById(userId).select('friends blockedUsers');
 
     if (!currentUser) {
       return res.status(404).json({
@@ -289,12 +289,17 @@ exports.getMyFriends = async (req, res) => {
       });
     }
 
-    const totalFriends = currentUser.friends.length;
+    const blockedIds = (currentUser.blockedUsers || []).map(b => b.toString());
+    const allowedFriendIds = (currentUser.friends || []).filter(
+      fid => !blockedIds.includes(fid.toString())
+    );
+
+    const totalFriends = allowedFriendIds.length;
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
     // Get friends with pagination and sorting
     const friends = await User.find({
-      _id: { $in: currentUser.friends }
+      _id: { $in: allowedFriendIds }
     })
       .select('_id fullName username handle profileImage')
       .sort({ fullName: 1 }) // Sort alphabetically by name

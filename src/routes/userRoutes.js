@@ -3,6 +3,12 @@ const router = express.Router();
 const { protect } = require('../middleware/auth');
 const { searchUsers, getUserProfile, updateUserProfile, updateUserInterests } = require('../controllers/userController');
 const {
+  getBlockedUsers,
+  blockUser,
+  unblockUser,
+  reportUser,
+} = require('../controllers/userActionsController');
+const {
   getFriendProfile,
   getFriendWishlists,
   getFriendEvents,
@@ -13,6 +19,12 @@ router.get('/search', protect, searchUsers);
 
 // Update user interests - requires authentication (must be before parameterized routes)
 router.put('/interests', protect, updateUserInterests);
+
+// Block and report (must be before /:id routes)
+router.get('/blocked', protect, getBlockedUsers);
+router.post('/block/:id', protect, blockUser);
+router.post('/unblock/:id', protect, unblockUser);
+router.post('/report/:id', protect, reportUser);
 
 // Get user profile by ID - requires authentication
 router.get('/:id/profile', protect, getUserProfile);
