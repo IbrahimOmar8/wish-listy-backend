@@ -361,9 +361,9 @@ exports.getFriendSuggestions = async (req, res) => {
   try {
     const userId = req.user.id;
 
-    // Step 1: Get current user's friends and dismissed suggestions
+    // Step 1: Get current user's friends, dismissed suggestions, and blocked users
     const currentUser = await User.findById(userId)
-      .select('friends dismissedSuggestions');
+      .select('friends dismissedSuggestions blockedUsers');
     
     if (!currentUser) {
       return res.status(404).json({
@@ -375,6 +375,7 @@ exports.getFriendSuggestions = async (req, res) => {
     const userFriends = currentUser.friends.map(f => f.toString());
     const userFriendsObjIds = currentUser.friends.map(f => new mongoose.Types.ObjectId(f));
     const dismissedUserIds = currentUser.dismissedSuggestions?.map(d => d.userId.toString()) || [];
+    const blockedUserIds = (currentUser.blockedUsers || []).map(b => b.toString());
 
     // Step 2: Get all pending/accepted requests involving the user
     const existingRequests = await FriendRequest.find({
@@ -385,11 +386,12 @@ exports.getFriendSuggestions = async (req, res) => {
       status: { $in: ['pending', 'accepted'] }
     }).select('from to');
 
-    // Build excluded user IDs set
+    // Build excluded user IDs set (self, friends, dismissed, blocked)
     const excludedUserIds = new Set([
       userId,
       ...userFriends,
-      ...dismissedUserIds
+      ...dismissedUserIds,
+      ...blockedUserIds
     ]);
     
     existingRequests.forEach(req => {

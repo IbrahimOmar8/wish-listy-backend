@@ -236,15 +236,19 @@ exports.getUserProfile = async (req, res) => {
     let relationship = {
       status: 'none',
       isFriend: false,
+      isBlockedByMe: false,
       incomingRequest: { exists: false, requestId: null },
       outgoingRequest: { exists: false, requestId: null }
     };
 
     // Only check relationship if viewing another user's profile (not own profile)
     if (currentUserId.toString() !== id.toString()) {
-      // Check if users are friends
-      const currentUser = await User.findById(currentUserId).select('friends');
-      const isFriend = currentUser.friends.some(
+      // Load current user to check friends and blocked status
+      const currentUser = await User.findById(currentUserId).select('friends blockedUsers');
+      relationship.isBlockedByMe = (currentUser.blockedUsers || []).some(
+        b => b.toString() === id.toString()
+      );
+      const isFriend = (currentUser.friends || []).some(
         friendId => friendId.toString() === id.toString()
       );
 
@@ -280,9 +284,10 @@ exports.getUserProfile = async (req, res) => {
         }
       }
     } else {
-      // Viewing own profile - set as friends (self)
+      // Viewing own profile - set as friends (self); never blocked by me
       relationship.status = 'friends';
       relationship.isFriend = true;
+      relationship.isBlockedByMe = false;
     }
 
     // Translate interests based on user's preferred language (if interests exist)
