@@ -315,11 +315,13 @@ exports.getItemById = async (req, res) => {
     }
 
     // Guest view: Show reservation info and purchase info
+    // isReserved MUST be true whenever isReservedByMe is true
+    const originalIsReserved = totalReserved > 0 && !isReservedByMe; // reserved by others
     const responseItem = {
       ...itemObj,
       availableQuantity,
       isReservedByMe,
-      isReserved: totalReserved > 0 && !isReservedByMe, // Reserved by someone else
+      isReserved: originalIsReserved || isReservedByMe,
       totalReserved,
       remainingQuantity: availableQuantity,
       wishlist: itemObj.wishlist

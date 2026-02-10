@@ -239,19 +239,20 @@ exports.getWishlistById = async (req, res) => {
         itemStatus = 'available';
       }
 
-      // Calculate isReserved: true if item has any reservations
-      // For owner: shows true if reserved (teaser mode - knows it's reserved but not who)
-      // For guest: shows true if reserved by someone else (not by me)
-      const isReserved = isOwner 
-        ? resInfo.totalReserved > 0  // Owner sees reservation status
-        : resInfo.totalReserved > 0 && !resInfo.reservedByMe;  // Guest sees if reserved by others
+      // Original reserved status: owner = any reservation; guest = reserved by others only
+      const originalIsReserved = isOwner
+        ? resInfo.totalReserved > 0
+        : resInfo.totalReserved > 0 && !resInfo.reservedByMe;
+      const isReservedByMeVal = isOwner ? false : resInfo.reservedByMe;
+      // isReserved MUST be true whenever isReservedByMe is true
+      const isReserved = originalIsReserved || isReservedByMeVal;
 
       // Build response based on viewer type
       const baseItem = {
         ...itemObj,
         itemStatus,
         availableQuantity: Math.max(0, item.quantity - resInfo.totalReserved), // Owner now sees actual available quantity
-        isReservedByMe: isOwner ? false : resInfo.reservedByMe, // Owner always sees false
+        isReservedByMe: isReservedByMeVal,
         isReserved,
       };
 
