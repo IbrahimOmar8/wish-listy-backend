@@ -295,8 +295,7 @@ exports.getFriendEvents = async (req, res) => {
       });
     }
 
-    // Case 2-5: Viewer is NOT the creator - Apply strict privacy filtering
-    // Get events where user is explicitly invited (regardless of privacy)
+    // Case 2-5: Viewer is NOT the creator — return events they're invited to OR public events
     const invitations = await EventInvitation.find({
       invitee: currentUserId,
     }).select('event status');
@@ -307,12 +306,13 @@ exports.getFriendEvents = async (req, res) => {
       invitationStatusMap[inv.event.toString()] = inv.status;
     });
 
-    // Only return events that the user is explicitly invited to
-    // Filter: Show only events where user is explicitly invited (regardless of privacy setting)
+    const invitedObjectIds = invitedEventIds.map((id) => new mongoose.Types.ObjectId(id));
     const privacyQuery = {
       creator: friendUserId,
-      // Only return events where user is explicitly invited
-      _id: { $in: invitedEventIds.map(id => new mongoose.Types.ObjectId(id)) }
+      $or: [
+        { _id: { $in: invitedObjectIds } },
+        { privacy: 'public' }
+      ]
     };
 
     const events = await Event.find(privacyQuery)
@@ -327,12 +327,7 @@ exports.getFriendEvents = async (req, res) => {
       events.map(async (event) => {
         const eventObj = event.toObject();
         const invitationStatus =
-          invitationStatusMap[event._id.toString()];
-
-        // Skip events if invitationStatus is missing or 'not_invited' (shouldn't happen with current query, but extra safety)
-        if (!invitationStatus || invitationStatus === 'not_invited') {
-          return null;
-        }
+          invitationStatusMap[event._id.toString()] || 'not_invited';
 
         // Get top 3 accepted attendees (excluding current user for social proof)
         const acceptedAttendees = await EventInvitation.find({
@@ -386,14 +381,11 @@ exports.getFriendEvents = async (req, res) => {
       })
     );
 
-    // Filter out null values (events that were skipped)
-    const filteredEvents = eventsWithStatus.filter(event => event !== null);
-
     return res.status(200).json({
       success: true,
       data: {
-        events: filteredEvents,
-        count: filteredEvents.length,
+        events: eventsWithStatus,
+        count: eventsWithStatus.length,
       },
     });
   } catch (error) {

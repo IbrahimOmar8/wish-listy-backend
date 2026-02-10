@@ -2,6 +2,7 @@ const User = require('../models/User');
 const FriendRequest = require('../models/FriendRequest');
 const Wishlist = require('../models/Wishlist');
 const Event = require('../models/Event');
+const EventInvitation = require('../models/Eventinvitation');
 const { translateInterests } = require('../utils/interestsTranslator');
 const { isValidCountryCode, isValidDateFormat, isNotFutureDate } = require('../utils/validators');
 
@@ -226,11 +227,24 @@ exports.getUserProfile = async (req, res) => {
       });
     }
 
-    // Calculate related counts in parallel
-    const [wishlistCount, eventsCount] = await Promise.all([
-      Wishlist.countDocuments({ owner: id }),
-      Event.countDocuments({ creator: id })
-    ]);
+    // Wishlist count: always total by owner
+    const wishlistCount = await Wishlist.countDocuments({ owner: id });
+
+    // Events count: same logic as GET /users/:id/events — own profile = all events; friend profile = invited OR public
+    let eventsCount;
+    if (currentUserId.toString() === id.toString()) {
+      eventsCount = await Event.countDocuments({ creator: id });
+    } else {
+      const myInvitations = await EventInvitation.find({ invitee: currentUserId }).select('event');
+      const invitedEventIds = myInvitations.map((inv) => inv.event);
+      eventsCount = await Event.countDocuments({
+        creator: id,
+        $or: [
+          { _id: { $in: invitedEventIds } },
+          { privacy: 'public' }
+        ]
+      });
+    }
 
     // Get relationship information between authenticated user and target user
     let relationship = {
