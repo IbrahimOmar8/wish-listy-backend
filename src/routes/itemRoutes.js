@@ -18,6 +18,9 @@ router.get('/reserved', itemController.getMyReservedItems);
 // Mark Item as Purchased
 router.put('/:id/purchase', itemController.markItemAsPurchased);
 
+// Extend reservation (reserver only)
+router.put('/:id/extend-reservation', itemController.extendReservation);
+
 // Update item status - isReceived (Owner only)
 router.put('/:id/status', itemController.updateItemStatus);
 

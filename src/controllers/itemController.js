@@ -523,6 +523,73 @@ exports.markItemAsPurchased = async (req, res) => {
   }
 };
 
+/**
+ * Extend reservation by 7 days (reserver only)
+ * PUT /api/items/:id/extend-reservation
+ */
+exports.extendReservation = async (req, res) => {
+  try {
+    const { id: itemId } = req.params;
+    const userId = req.user.id;
+
+    const item = await Item.findById(itemId).select('name wishlist reservedUntil isReceived');
+    if (!item) {
+      return res.status(404).json({
+        success: false,
+        message: 'Item not found'
+      });
+    }
+    if (item.isReceived) {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot extend reservation for an item that has been received'
+      });
+    }
+
+    const reservation = await Reservation.findOne({
+      item: itemId,
+      reserver: userId,
+      status: 'reserved'
+    });
+    if (!reservation) {
+      return res.status(403).json({
+        success: false,
+        message: 'Only the user who reserved this item can extend the reservation'
+      });
+    }
+
+    const currentUntil = item.reservedUntil ? new Date(item.reservedUntil) : null;
+    if (!currentUntil || currentUntil.getTime() <= Date.now()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Reservation has already expired; cannot extend'
+      });
+    }
+
+    const reservedUntilNew = new Date(currentUntil.getTime() + 7 * 24 * 60 * 60 * 1000);
+    await Item.findByIdAndUpdate(itemId, {
+      reservedUntil: reservedUntilNew,
+      reservationReminderSent: false
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Reservation extended by 7 days',
+      data: {
+        reservedUntil: reservedUntilNew,
+        reservationReminderSent: false
+      }
+    });
+  } catch (error) {
+    console.error('Extend reservation error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to extend reservation',
+      error: error.message
+    });
+  }
+};
+
 // @desc    Toggle item reservation (Reserve/Cancel)
 // @route   PUT /api/items/:id/reserve
 // @access  Private (Guest only - not owner)

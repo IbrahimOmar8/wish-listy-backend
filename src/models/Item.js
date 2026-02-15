@@ -67,6 +67,14 @@ const itemSchema = new mongoose.Schema({
     default: 1,
     min: 1
   },
+  reservedUntil: {
+    type: Date,
+    default: null
+  },
+  reservationReminderSent: {
+    type: Boolean,
+    default: false
+  },
   createdAt: {
     type: Date,
     default: Date.now

@@ -13,7 +13,7 @@ const { createNotification } = require('../utils/notificationHelper');
 exports.reserveItem = async (req, res) => {
   try {
     const { itemId } = req.params;
-    const { quantity = 1, action } = req.body;
+    const { quantity = 1, action, reservedUntil: reservedUntilBody } = req.body;
     const reserverId = req.user.id;
 
     // Validate quantity
@@ -89,6 +89,18 @@ exports.reserveItem = async (req, res) => {
       reservation.status = 'cancelled';
       await reservation.save();
 
+      // Clear Item reservation expiry if no other active reservations for this item
+      const otherActive = await Reservation.countDocuments({
+        item: itemId,
+        status: 'reserved',
+      });
+      if (otherActive === 0) {
+        await Item.findByIdAndUpdate(itemId, {
+          reservedUntil: null,
+          reservationReminderSent: false,
+        });
+      }
+
       return res.status(200).json({
         success: true,
         message: 'Reservation cancelled successfully',
@@ -152,6 +164,22 @@ exports.reserveItem = async (req, res) => {
       await reservation.save();
     }
 
+    // Set reservation expiration on Item: optional reservedUntil from body, default 7 days
+    let reservedUntilDate = null;
+    if (reservedUntilBody) {
+      reservedUntilDate = new Date(reservedUntilBody);
+      if (Number.isNaN(reservedUntilDate.getTime())) {
+        reservedUntilDate = null;
+      }
+    }
+    if (!reservedUntilDate || reservedUntilDate <= new Date()) {
+      reservedUntilDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    }
+    await Item.findByIdAndUpdate(itemId, {
+      reservedUntil: reservedUntilDate,
+      reservationReminderSent: false,
+    });
+
     // Create notification for the item owner (without revealing who reserved it - privacy protection)
     // Ensure we get wishlist ID correctly (handle both populated object and ObjectId)
     let wishlistId;
@@ -193,6 +221,8 @@ exports.reserveItem = async (req, res) => {
           status: reservation.status,
         },
         isReserved: true,
+        reservedUntil: reservedUntilDate,
+        reservationReminderSent: false,
       },
     });
   } catch (error) {
@@ -235,6 +265,18 @@ exports.cancelReservation = async (req, res) => {
 
     reservation.status = 'cancelled';
     await reservation.save();
+
+    // Clear Item reservation expiry if no other active reservations for this item
+    const otherActive = await Reservation.countDocuments({
+      item: itemId,
+      status: 'reserved',
+    });
+    if (otherActive === 0) {
+      await Item.findByIdAndUpdate(itemId, {
+        reservedUntil: null,
+        reservationReminderSent: false,
+      });
+    }
 
     // Get item with wishlist to notify owner
     const item = await Item.findById(itemId).populate({

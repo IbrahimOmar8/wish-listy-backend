@@ -24,6 +24,10 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   
   // Make io accessible to routes via app
   app.set('io', io);
+
+  // Start reservation expiration cron (auto-cancel expired, 48h reminder)
+  const { startReservationCron } = require('./src/services/reservationCron');
+  startReservationCron(io);
   
   console.log('✅ Server fully initialized and ready');
 });
