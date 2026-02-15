@@ -619,6 +619,8 @@ exports.getEventWishlists = async (req, res) => {
         ...itemObj,
         itemStatus,
         isReservedByMe: resInfo.reservedByMe,
+        reservedUntil: resInfo.reservedByMe ? (itemObj.reservedUntil ?? null) : null,
+        reservationReminderSent: resInfo.reservedByMe ? (itemObj.reservationReminderSent ?? false) : false,
         ...(!isWishlistOwner
           ? {
               totalReserved: resInfo.totalReserved,

@@ -308,8 +308,9 @@ exports.getItemById = async (req, res) => {
           isReserved: totalReserved > 0, // Owner sees if item is reserved
           totalReserved, // Owner sees count but not who reserved
           itemStatus, // Owner sees status
-          wishlist: itemObj.wishlist
-          // Note: No reserver details (names, IDs) are included for owner privacy
+          wishlist: itemObj.wishlist,
+          reservedUntil: null, // Owner must not see reservation deadline (privacy)
+          reservationReminderSent: false
         }
       });
     }
@@ -324,7 +325,10 @@ exports.getItemById = async (req, res) => {
       isReserved: originalIsReserved || isReservedByMe,
       totalReserved,
       remainingQuantity: availableQuantity,
-      wishlist: itemObj.wishlist
+      wishlist: itemObj.wishlist,
+      // Privacy: only reserver sees reservedUntil / reservationReminderSent
+      reservedUntil: isReservedByMe ? (itemObj.reservedUntil ?? null) : null,
+      reservationReminderSent: isReservedByMe ? (itemObj.reservationReminderSent ?? false) : false
     };
 
     res.status(200).json({
