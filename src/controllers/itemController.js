@@ -579,22 +579,33 @@ exports.extendReservation = async (req, res) => {
         message: 'reservedUntil is required'
       });
     }
-    const reservedUntilNew = new Date(reservedUntilBody);
-    if (Number.isNaN(reservedUntilNew.getTime())) {
+    const requestedUntil = new Date(reservedUntilBody);
+    if (Number.isNaN(requestedUntil.getTime())) {
       return res.status(400).json({
         success: false,
         message: 'Invalid reservedUntil date'
       });
     }
-    if (reservedUntilNew.getTime() <= Date.now()) {
+    const nowMs = Date.now();
+    if (requestedUntil.getTime() <= nowMs) {
       return res.status(400).json({
         success: false,
         message: 'reservedUntil must be a future date'
       });
     }
 
+    // Requested duration from now (frontend sends a date calculated from Date.now())
+    const requestedDurationMs = requestedUntil.getTime() - nowMs;
+
+    // Add that duration to the existing expiry so remaining time is preserved
+    const currentExpiry = item.reservedUntil ? new Date(item.reservedUntil) : null;
+    const baseMs = (currentExpiry && currentExpiry.getTime() > nowMs)
+      ? currentExpiry.getTime()
+      : nowMs;
+    const actualNewExpiry = new Date(baseMs + requestedDurationMs);
+
     await Item.findByIdAndUpdate(itemId, {
-      reservedUntil: reservedUntilNew,
+      reservedUntil: actualNewExpiry,
       reservationReminderSent: false,
       $inc: { extensionCount: 1 }
     });
@@ -605,7 +616,7 @@ exports.extendReservation = async (req, res) => {
       success: true,
       message: 'Reservation extended successfully',
       data: {
-        reservedUntil: reservedUntilNew,
+        reservedUntil: actualNewExpiry,
         reservationReminderSent: false,
         extensionCount: newExtensionCount
       }
