@@ -333,6 +333,8 @@ exports.cancelReservation = async (req, res) => {
 /**
  * Get my reservations
  * GET /api/reservations
+ * Returns current user's reservations with item populated (reservedUntil, extensionCount, reservationReminderSent, itemStatus).
+ * Since the user is always the reserver, reservation-related fields are returned as stored (no privacy nulling).
  */
 exports.getMyReservations = async (req, res) => {
   try {
@@ -345,7 +347,7 @@ exports.getMyReservations = async (req, res) => {
     })
       .populate({
         path: 'item',
-        select: 'name description image url priority isReceived reservedBy',
+        select: 'name description image url storeName storeLocation notes priority quantity isPurchased purchasedBy purchasedAt isReceived wishlist reservedUntil reservationReminderSent extensionCount createdAt updatedAt',
         populate: {
           path: 'wishlist',
           select: 'name owner',
@@ -357,11 +359,25 @@ exports.getMyReservations = async (req, res) => {
       })
       .sort({ createdAt: -1 });
 
+    const reservationsWithItemStatus = reservations.map((res) => {
+      const reservationObj = res.toObject();
+      if (reservationObj.item) {
+        const item = reservationObj.item;
+        reservationObj.item = {
+          ...item,
+          isReservedByMe: true,
+          isReserved: true,
+          itemStatus: item.isReceived ? 'gifted' : item.isPurchased ? 'gifted' : 'reserved',
+        };
+      }
+      return reservationObj;
+    });
+
     return res.status(200).json({
       success: true,
       data: {
-        reservations,
-        count: reservations.length,
+        reservations: reservationsWithItemStatus,
+        count: reservationsWithItemStatus.length,
       },
     });
   } catch (error) {
