@@ -12,7 +12,6 @@ const mongoose = require('mongoose');
 const { generateToken } = require('../utils/jwt');
 const bcrypt = require('bcryptjs');
 const { generateUniqueHandle } = require('../utils/handleGenerator');
-const { translateInterests } = require('../utils/interestsTranslator');
 const { isValidCountryCode, isValidDateFormat, isNotFutureDate } = require('../utils/validators');
 const { sendPasswordResetEmail, sendRegistrationOTPEmail } = require('../utils/email');
 const { uploadProfileImage, deleteImage } = require('../config/cloudinary');
@@ -1094,12 +1093,7 @@ exports.getMe = async (req, res) => {
     const user = await User.findById(req.user.id)
       .select('-__v -password');
 
-    // Translate interests based on user's preferred language
     let userData = user.toObject();
-    if (userData.interests && Array.isArray(userData.interests)) {
-      const userLanguage = userData.preferredLanguage || 'en';
-      userData.interests = translateInterests(userData.interests, userLanguage);
-    }
 
     // Format birth_date to YYYY-MM-DD if exists
     if (userData.birth_date) {
@@ -1135,12 +1129,7 @@ exports.getProfile = async (req, res) => {
       });
     }
 
-    // Translate interests based on user's preferred language
     let userData = user.toObject();
-    if (userData.interests && Array.isArray(userData.interests)) {
-      const userLanguage = userData.preferredLanguage || 'en';
-      userData.interests = translateInterests(userData.interests, userLanguage);
-    }
 
     // Format birth_date to YYYY-MM-DD if exists
     if (userData.birth_date) {
@@ -1290,12 +1279,6 @@ exports.updateProfile = async (req, res) => {
     // Format response
     let userData = updatedUser.toObject();
     
-    // Translate interests
-    if (userData.interests && Array.isArray(userData.interests)) {
-      const userLanguage = userData.preferredLanguage || 'en';
-      userData.interests = translateInterests(userData.interests, userLanguage);
-    }
-
     // Format birth_date to YYYY-MM-DD if exists
     if (userData.birth_date) {
       const date = new Date(userData.birth_date);
@@ -1502,12 +1485,6 @@ exports.updateProfileWithImage = async (req, res) => {
 
     // Format response
     let userData = updatedUser.toObject();
-
-    // Translate interests
-    if (userData.interests && Array.isArray(userData.interests)) {
-      const userLanguage = userData.preferredLanguage || 'en';
-      userData.interests = translateInterests(userData.interests, userLanguage);
-    }
 
     // Format birth_date to YYYY-MM-DD if exists
     if (userData.birth_date) {

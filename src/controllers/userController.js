@@ -3,7 +3,6 @@ const FriendRequest = require('../models/FriendRequest');
 const Wishlist = require('../models/Wishlist');
 const Event = require('../models/Event');
 const EventInvitation = require('../models/Eventinvitation');
-const { translateInterests } = require('../utils/interestsTranslator');
 const { isValidCountryCode, isValidDateFormat, isNotFutureDate } = require('../utils/validators');
 
 // Search users by fullName, handle, or username (Unified Triple-Field Search)
@@ -190,15 +189,11 @@ exports.updateUserInterests = async (req, res) => {
       });
     }
 
-    // Translate interests based on user's preferred language
-    const userLanguage = user.preferredLanguage || 'en';
-    const translatedInterests = translateInterests(user.interests, userLanguage);
-
     res.status(200).json({
       success: true,
       message: 'Interests updated successfully',
       data: {
-        interests: translatedInterests
+        interests: user.interests
       }
     });
   } catch (error) {
@@ -304,13 +299,6 @@ exports.getUserProfile = async (req, res) => {
       relationship.isBlockedByMe = false;
     }
 
-    // Translate interests based on user's preferred language (if interests exist)
-    let translatedInterests = [];
-    if (user.interests && Array.isArray(user.interests)) {
-      const userLanguage = user.preferredLanguage || 'en';
-      translatedInterests = translateInterests(user.interests, userLanguage);
-    }
-
     // Format birth_date to YYYY-MM-DD if exists
     let formattedBirthDate = null;
     if (user.birth_date) {
@@ -336,7 +324,7 @@ exports.getUserProfile = async (req, res) => {
         gender: user.gender || null,
         birth_date: formattedBirthDate,
         country_code: user.country_code || null,
-        interests: translatedInterests,
+        interests: user.interests || [],
         friendsCount: user.friends.length,
         wishlistCount,
         eventsCount,
@@ -512,12 +500,6 @@ exports.updateUserProfile = async (req, res) => {
 
     // Format response
     let userData = updatedUser.toObject();
-    
-    // Translate interests
-    if (userData.interests && Array.isArray(userData.interests)) {
-      const userLanguage = userData.preferredLanguage || 'en';
-      userData.interests = translateInterests(userData.interests, userLanguage);
-    }
 
     // Format birth_date to YYYY-MM-DD if exists
     if (userData.birth_date) {
