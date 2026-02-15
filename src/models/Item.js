@@ -75,6 +75,10 @@ const itemSchema = new mongoose.Schema({
     type: Boolean,
     default: false
   },
+  extensionCount: {
+    type: Number,
+    default: 0
+  },
   createdAt: {
     type: Date,
     default: Date.now

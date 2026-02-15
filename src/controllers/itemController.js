@@ -536,7 +536,7 @@ exports.extendReservation = async (req, res) => {
     const { id: itemId } = req.params;
     const userId = req.user.id;
 
-    const item = await Item.findById(itemId).select('name wishlist reservedUntil isReceived');
+    const item = await Item.findById(itemId).select('name wishlist reservedUntil isReceived extensionCount');
     if (!item) {
       return res.status(404).json({
         success: false,
@@ -547,6 +547,13 @@ exports.extendReservation = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: 'Cannot extend reservation for an item that has been received'
+      });
+    }
+
+    if ((item.extensionCount ?? 0) >= 2) {
+      return res.status(400).json({
+        success: false,
+        message: 'Maximum number of extensions reached'
       });
     }
 
@@ -573,7 +580,8 @@ exports.extendReservation = async (req, res) => {
     const reservedUntilNew = new Date(currentUntil.getTime() + 7 * 24 * 60 * 60 * 1000);
     await Item.findByIdAndUpdate(itemId, {
       reservedUntil: reservedUntilNew,
-      reservationReminderSent: false
+      reservationReminderSent: false,
+      $inc: { extensionCount: 1 }
     });
 
     return res.status(200).json({
@@ -581,7 +589,8 @@ exports.extendReservation = async (req, res) => {
       message: 'Reservation extended by 7 days',
       data: {
         reservedUntil: reservedUntilNew,
-        reservationReminderSent: false
+        reservationReminderSent: false,
+        extensionCount: (item.extensionCount ?? 0) + 1
       }
     });
   } catch (error) {

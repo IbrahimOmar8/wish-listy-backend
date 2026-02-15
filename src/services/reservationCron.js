@@ -43,7 +43,8 @@ async function cancelExpiredReservations(io) {
 
     await Item.findByIdAndUpdate(item._id, {
       reservedUntil: null,
-      reservationReminderSent: false
+      reservationReminderSent: false,
+      extensionCount: 0
     });
   }
 }

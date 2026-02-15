@@ -98,6 +98,7 @@ exports.reserveItem = async (req, res) => {
         await Item.findByIdAndUpdate(itemId, {
           reservedUntil: null,
           reservationReminderSent: false,
+          extensionCount: 0,
         });
       }
 
@@ -178,6 +179,7 @@ exports.reserveItem = async (req, res) => {
     await Item.findByIdAndUpdate(itemId, {
       reservedUntil: reservedUntilDate,
       reservationReminderSent: false,
+      extensionCount: 0,
     });
 
     // Create notification for the item owner (without revealing who reserved it - privacy protection)
@@ -275,6 +277,7 @@ exports.cancelReservation = async (req, res) => {
       await Item.findByIdAndUpdate(itemId, {
         reservedUntil: null,
         reservationReminderSent: false,
+        extensionCount: 0,
       });
     }
 
