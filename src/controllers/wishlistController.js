@@ -138,7 +138,7 @@ exports.getMyWishlists = async (req, res) => {
     const wishlists = await Wishlist.find({ owner: req.user.id })
       .populate({
         path: 'items',
-        select: '-reservedUntil -reservationReminderSent',
+        select: '-reservedUntil -reservationReminderSent -extensionCount',
         options: { sort: { priority: -1, createdAt: -1 } } // Sort by priority and date
       })
       .populate('owner', 'fullName username profileImage');
@@ -267,10 +267,11 @@ exports.getWishlistById = async (req, res) => {
         baseItem.totalReserved = resInfo.totalReserved;
       }
 
-      // Privacy: only the guest who reserved (isReservedByMe) may see reservedUntil / reservationReminderSent
+      // Privacy: only the guest who reserved (isReservedByMe) may see reservedUntil / reservationReminderSent / extensionCount
       if (!isReservedByMeVal) {
         baseItem.reservedUntil = null;
         baseItem.reservationReminderSent = false;
+        baseItem.extensionCount = 0;
       }
 
       return baseItem;

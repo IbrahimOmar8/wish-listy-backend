@@ -310,7 +310,8 @@ exports.getItemById = async (req, res) => {
           itemStatus, // Owner sees status
           wishlist: itemObj.wishlist,
           reservedUntil: null, // Owner must not see reservation deadline (privacy)
-          reservationReminderSent: false
+          reservationReminderSent: false,
+          extensionCount: 0
         }
       });
     }
@@ -326,9 +327,10 @@ exports.getItemById = async (req, res) => {
       totalReserved,
       remainingQuantity: availableQuantity,
       wishlist: itemObj.wishlist,
-      // Privacy: only reserver sees reservedUntil / reservationReminderSent
+      // Privacy: only reserver sees reservedUntil / reservationReminderSent / extensionCount
       reservedUntil: isReservedByMe ? (itemObj.reservedUntil ?? null) : null,
-      reservationReminderSent: isReservedByMe ? (itemObj.reservationReminderSent ?? false) : false
+      reservationReminderSent: isReservedByMe ? (itemObj.reservationReminderSent ?? false) : false,
+      extensionCount: isReservedByMe ? (itemObj.extensionCount ?? 0) : 0
     };
 
     res.status(200).json({
@@ -528,12 +530,14 @@ exports.markItemAsPurchased = async (req, res) => {
 };
 
 /**
- * Extend reservation by 7 days (reserver only)
+ * Extend reservation with a new date (reserver only). Max 2 extensions.
  * PUT /api/items/:id/extend-reservation
+ * Body: { reservedUntil: "ISO date string" }
  */
 exports.extendReservation = async (req, res) => {
   try {
     const { id: itemId } = req.params;
+    const { reservedUntil: reservedUntilBody } = req.body;
     const userId = req.user.id;
 
     const item = await Item.findById(itemId).select('name wishlist reservedUntil isReceived extensionCount');
@@ -569,28 +573,41 @@ exports.extendReservation = async (req, res) => {
       });
     }
 
-    const currentUntil = item.reservedUntil ? new Date(item.reservedUntil) : null;
-    if (!currentUntil || currentUntil.getTime() <= Date.now()) {
+    if (!reservedUntilBody) {
       return res.status(400).json({
         success: false,
-        message: 'Reservation has already expired; cannot extend'
+        message: 'reservedUntil is required'
+      });
+    }
+    const reservedUntilNew = new Date(reservedUntilBody);
+    if (Number.isNaN(reservedUntilNew.getTime())) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid reservedUntil date'
+      });
+    }
+    if (reservedUntilNew.getTime() <= Date.now()) {
+      return res.status(400).json({
+        success: false,
+        message: 'reservedUntil must be a future date'
       });
     }
 
-    const reservedUntilNew = new Date(currentUntil.getTime() + 7 * 24 * 60 * 60 * 1000);
     await Item.findByIdAndUpdate(itemId, {
       reservedUntil: reservedUntilNew,
       reservationReminderSent: false,
       $inc: { extensionCount: 1 }
     });
 
+    const newExtensionCount = (item.extensionCount ?? 0) + 1;
+
     return res.status(200).json({
       success: true,
-      message: 'Reservation extended by 7 days',
+      message: 'Reservation extended successfully',
       data: {
         reservedUntil: reservedUntilNew,
         reservationReminderSent: false,
-        extensionCount: (item.extensionCount ?? 0) + 1
+        extensionCount: newExtensionCount
       }
     });
   } catch (error) {
