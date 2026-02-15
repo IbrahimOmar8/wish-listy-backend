@@ -421,22 +421,24 @@ exports.getFriendSuggestions = async (req, res) => {
         }
       },
       
-      // Stage 3: Calculate mutual friends count using $setIntersection
+      // Stage 3: Calculate mutual friends (IDs and count) using $setIntersection
       {
         $addFields: {
-          mutualFriendsCount: {
-            $size: {
-              $setIntersection: [
-                { $ifNull: ['$friends', []] },
-                userFriendsObjIds
-              ]
-            }
+          mutualFriendIds: {
+            $setIntersection: [
+              { $ifNull: ['$friends', []] },
+              userFriendsObjIds
+            ]
           }
+        }
+      },
+      {
+        $addFields: {
+          mutualFriendsCount: { $size: '$mutualFriendIds' }
         }
       },
       
       // Stage 4: FILTER - Exclude candidates with 0 mutual friends (CRITICAL)
-      // Only keep users who have at least 1 mutual friend
       {
         $match: {
           mutualFriendsCount: { $gt: 0 }
@@ -448,19 +450,43 @@ exports.getFriendSuggestions = async (req, res) => {
         $sort: { mutualFriendsCount: -1 }
       },
       
-      // Stage 6: Limit to top 50 candidates (of those with mutual friends)
+      // Stage 6: Limit to top 50 candidates
       {
         $limit: 50
       },
       
-      // Stage 7: Project final fields
+      // Stage 7: Slice up to 3 IDs for preview
+      {
+        $addFields: {
+          previewIds: { $slice: ['$mutualFriendIds', 3] }
+        }
+      },
+      
+      // Stage 8: Lookup preview users (_id, fullName, profileImage)
+      {
+        $lookup: {
+          from: 'users',
+          let: { ids: '$previewIds' },
+          pipeline: [
+            { $match: { $expr: { $in: ['$_id', '$$ids'] } } },
+            { $project: { _id: 1, fullName: 1, profileImage: 1 } }
+          ],
+          as: 'preview'
+        }
+      },
+      
+      // Stage 9: Project final fields with mutualFriendsData
       {
         $project: {
           _id: 1,
           fullName: 1,
           username: 1,
-          avatar: '$profileImage', // Map profileImage to avatar
-          mutualFriendsCount: 1
+          avatar: '$profileImage',
+          mutualFriendsCount: 1,
+          mutualFriendsData: {
+            totalCount: '$mutualFriendsCount',
+            preview: '$preview'
+          }
         }
       }
     ]);

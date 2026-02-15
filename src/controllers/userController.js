@@ -250,6 +250,9 @@ exports.getUserProfile = async (req, res) => {
       outgoingRequest: { exists: false, requestId: null }
     };
 
+    // Mutual friends data (for guest profile: intersection of current user's and profile user's friends)
+    let mutualFriendsData = { totalCount: 0, preview: [] };
+
     // Only check relationship if viewing another user's profile (not own profile)
     if (currentUserId.toString() !== id.toString()) {
       // Load current user to check friends and blocked status
@@ -260,6 +263,25 @@ exports.getUserProfile = async (req, res) => {
       const isFriend = (currentUser.friends || []).some(
         friendId => friendId.toString() === id.toString()
       );
+
+      // Mutual friends: intersection of current user's friends and profile user's friends
+      const myFriendIds = (currentUser.friends || []).map(f => f.toString());
+      const theirFriendIds = (user.friends || []).map(f => f.toString());
+      const mutualIds = theirFriendIds.filter(fid => myFriendIds.includes(fid));
+      if (mutualIds.length > 0) {
+        const previewIds = mutualIds.slice(0, 3);
+        const previewUsers = await User.find({ _id: { $in: previewIds } })
+          .select('_id fullName profileImage')
+          .lean();
+        mutualFriendsData = {
+          totalCount: mutualIds.length,
+          preview: previewUsers.map(u => ({
+            _id: u._id,
+            fullName: u.fullName,
+            profileImage: u.profileImage ?? null
+          }))
+        };
+      }
 
       if (isFriend) {
         relationship.status = 'friends';
@@ -329,7 +351,8 @@ exports.getUserProfile = async (req, res) => {
         wishlistCount,
         eventsCount,
         createdAt: user.createdAt,
-        relationship
+        relationship,
+        mutualFriendsData
       }
     });
   } catch (error) {
