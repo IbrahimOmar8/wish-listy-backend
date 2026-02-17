@@ -24,6 +24,9 @@ router.put('/:id/extend-reservation', itemController.extendReservation);
 // Update item status - isReceived (Owner only)
 router.put('/:id/status', itemController.updateItemStatus);
 
+// Mark as not received / dispute purchase (Owner only)
+router.put('/:id/not-received', itemController.markAsNotReceived);
+
 // Get Item by ID
 router.get('/:id', itemController.getItemById);
 

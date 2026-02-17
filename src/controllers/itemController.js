@@ -833,3 +833,98 @@ exports.updateItemStatus = async (req, res) => {
     });
   }
 };
+
+/**
+ * Mark item as not received (dispute purchase) - Owner only.
+ * PUT /api/items/:id/not-received
+ * Reverts item from purchased back to reserved (clears isPurchased, purchasedBy, purchasedAt).
+ * Notifies the user who marked it as purchased.
+ */
+exports.markAsNotReceived = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+
+    const item = await Item.findById(id)
+      .populate({
+        path: 'wishlist',
+        select: 'owner _id',
+        populate: { path: 'owner', select: '_id fullName username' }
+      })
+      .populate('purchasedBy', '_id fullName username');
+
+    if (!item) {
+      return res.status(404).json({
+        success: false,
+        message: 'Item not found'
+      });
+    }
+
+    if (!item.wishlist || !item.wishlist.owner) {
+      return res.status(400).json({
+        success: false,
+        message: 'Item does not have a valid wishlist'
+      });
+    }
+
+    if (item.wishlist.owner._id.toString() !== userId) {
+      return res.status(403).json({
+        success: false,
+        message: 'Only the wishlist owner can mark an item as not received'
+      });
+    }
+
+    if (!item.isPurchased) {
+      return res.status(400).json({
+        success: false,
+        message: 'Item is not in purchased status. Only purchased items can be marked as not received.'
+      });
+    }
+
+    const purchaserId = item.purchasedBy ? (item.purchasedBy._id || item.purchasedBy) : null;
+    const wishlistId = item.wishlist._id || item.wishlist;
+
+    await Item.findByIdAndUpdate(id, {
+      $set: { isPurchased: false },
+      $unset: { purchasedBy: 1, purchasedAt: 1 }
+    });
+
+    if (purchaserId && wishlistId) {
+      await createNotification({
+        recipientId: purchaserId,
+        senderId: userId,
+        type: 'item_not_received',
+        title: 'Gift not received yet',
+        messageKey: 'notif.item_not_received',
+        messageVariables: {},
+        relatedId: id,
+        relatedWishlistId: wishlistId,
+        emitSocketEvent: true,
+        socketIo: req.app.get('io')
+      });
+    }
+
+    const updatedItem = await Item.findById(id)
+      .populate('purchasedBy', 'fullName username profileImage')
+      .populate({
+        path: 'wishlist',
+        select: '_id name description owner privacy',
+        populate: { path: 'owner', select: '_id fullName username profileImage' }
+      });
+
+    const itemObj = updatedItem.toObject();
+
+    res.status(200).json({
+      success: true,
+      message: 'Item marked as not received. The giver has been notified.',
+      item: itemObj
+    });
+  } catch (error) {
+    console.error('Mark as not received error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to mark item as not received',
+      error: error.message
+    });
+  }
+};

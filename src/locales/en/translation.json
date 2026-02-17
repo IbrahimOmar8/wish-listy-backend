@@ -85,6 +85,7 @@
     "item_unreserved": "A gift in your wishlist is available again",
     "item_purchased": "Congratulations! A gift has been purchased for you! 🎉",
     "item_received": "{{senderName}} received your gift '{{itemName}}'! 🎁",
+    "item_not_received": "The owner mentioned they haven't received the gift yet. Please check the status.",
     "reservation_expired": "Your reservation for \"{{itemName}}\" has expired and is available again.",
     "reservation_reminder": "Reminder: Your reservation for \"{{itemName}}\" expires in 48 hours. Mark as purchased or extend it!"
   },
