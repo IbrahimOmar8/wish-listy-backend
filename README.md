@@ -511,9 +511,10 @@ All endpoints return errors in the following format:
    - Or use mongo shell for CLI
 
 3. **JWT Token**
-   - Token expires in 7 days by default
-   - Include token in Authorization header: `Bearer <token>`
-   - Token contains user ID for authorization
+   - Access token expires in 90 days by default (`JWT_EXPIRE=90d` in `.env`)
+   - Refresh token (1 year default) is returned on login/verify; use `POST /api/auth/refresh` with body `{ "refreshToken": "..." }` to get a new access token when it expires
+   - Include access token in Authorization header: `Bearer <token>`
+   - On logout, send optional body `{ "refreshToken": "..." }` to revoke that session, or `{ "all": true }` to revoke all sessions (logout from all devices)
 
 ---
 

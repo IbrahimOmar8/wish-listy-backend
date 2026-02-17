@@ -8,8 +8,9 @@ const Event = require('../models/Event');
 const EventInvitation = require('../models/Eventinvitation');
 const OTP = require('../models/OTP');
 const PasswordResetToken = require('../models/PasswordResetToken');
+const RefreshToken = require('../models/RefreshToken');
 const mongoose = require('mongoose');
-const { generateToken } = require('../utils/jwt');
+const { generateToken, generateRefreshToken, verifyRefreshToken } = require('../utils/jwt');
 const bcrypt = require('bcryptjs');
 const { generateUniqueHandle } = require('../utils/handleGenerator');
 const { isValidCountryCode, isValidDateFormat, isNotFutureDate } = require('../utils/validators');
@@ -23,6 +24,18 @@ const os = require('os');
 // Regex patterns for username validation (email/phone)
 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const phoneRegex = /^\+?[0-9]{7,15}$/;
+
+/**
+ * Generate access + refresh tokens and persist refresh token in DB (for revocation / logout all).
+ * @param {mongoose.Types.ObjectId} userId
+ * @returns {{ token: string, refreshToken: string }}
+ */
+async function createTokensForUser(userId) {
+  const token = generateToken(userId);
+  const { token: refreshToken, jti, expiresAt } = generateRefreshToken(userId);
+  await RefreshToken.create({ user: userId, jti, expiresAt });
+  return { token, refreshToken };
+}
 
 /**
  * Request Password Reset API
@@ -450,12 +463,13 @@ exports.verifyPasswordAndLogin = async (req, res) => {
       await User.findByIdAndUpdate(user._id, { fcmToken });
     }
 
-    const token = generateToken(user._id);
+    const { token, refreshToken } = await createTokensForUser(user._id);
 
     res.status(200).json({
       success: true,
       message: req.t('auth.login_success'),
       token,
+      refreshToken,
       user: {
         id: user._id,
         fullName: user.fullName,
@@ -560,13 +574,13 @@ exports.verifyOTP = async (req, res) => {
     user.otpExpiresAt = null;
     await user.save();
 
-    // Generate token for verified user
-    const token = generateToken(user._id);
+    const { token, refreshToken } = await createTokensForUser(user._id);
 
     res.status(200).json({
       success: true,
       message: req.t ? req.t('auth.verification_success') : 'Account verified successfully!',
       token,
+      refreshToken,
       user: {
         id: user._id,
         fullName: user.fullName,
@@ -730,14 +744,13 @@ exports.verifySuccess = async (req, res) => {
     // Check if user is already verified
     // If already verified, return success response (frontend can handle gracefully)
     if (user.isVerified) {
-      // Generate token for already verified user
-      const token = generateToken(user._id);
-      
+      const { token, refreshToken } = await createTokensForUser(user._id);
       return res.status(200).json({
         success: true,
         message: 'Account is already verified',
         alreadyVerified: true,
         token,
+        refreshToken,
         user: {
           id: user._id,
           fullName: user.fullName,
@@ -754,13 +767,13 @@ exports.verifySuccess = async (req, res) => {
     user.otpExpiresAt = null;
     await user.save();
 
-    // Generate JWT token for verified user
-    const token = generateToken(user._id);
+    const { token, refreshToken } = await createTokensForUser(user._id);
 
     res.status(200).json({
       success: true,
       message: 'Account verified successfully',
       token,
+      refreshToken,
       user: {
         id: user._id,
         fullName: user.fullName,
@@ -1528,11 +1541,95 @@ exports.updateProfileWithImage = async (req, res) => {
   }
 };
 
+/**
+ * Refresh access token
+ * POST /api/auth/refresh
+ * Body: { refreshToken: "..." }
+ * Returns new access_token and new refreshToken when the current access token has expired.
+ * Refresh token must be valid and present in DB (not revoked).
+ */
+exports.refreshToken = async (req, res) => {
+  try {
+    const { refreshToken: refreshTokenBody } = req.body;
+    if (!refreshTokenBody) {
+      return res.status(400).json({
+        success: false,
+        message: 'refreshToken is required'
+      });
+    }
+
+    const decoded = verifyRefreshToken(refreshTokenBody);
+    if (!decoded || !decoded.jti || !decoded.id) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid refresh token'
+      });
+    }
+
+    const stored = await RefreshToken.findOne({
+      user: decoded.id,
+      jti: decoded.jti,
+      expiresAt: { $gt: new Date() }
+    });
+    if (!stored) {
+      return res.status(401).json({
+        success: false,
+        message: 'Refresh token expired or revoked'
+      });
+    }
+
+    const user = await User.findById(decoded.id);
+    if (!user || !user.isVerified) {
+      return res.status(401).json({
+        success: false,
+        message: 'User not found or not verified'
+      });
+    }
+
+    const { token, refreshToken: newRefreshToken } = await createTokensForUser(user._id);
+    await RefreshToken.deleteOne({ jti: decoded.jti });
+
+    res.status(200).json({
+      success: true,
+      message: 'Token refreshed',
+      token,
+      refreshToken: newRefreshToken
+    });
+  } catch (error) {
+    if (error.name === 'TokenExpiredError' || error.name === 'JsonWebTokenError') {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid or expired refresh token'
+      });
+    }
+    console.error('Refresh token error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to refresh token',
+      error: error.message
+    });
+  }
+};
+
 // Logout user
 exports.logout = async (req, res) => {
   try {
     const userId = req.user.id;
-    
+    const { refreshToken: refreshTokenBody, all: logoutAll } = req.body || {};
+
+    if (logoutAll) {
+      await RefreshToken.deleteMany({ user: userId });
+    } else if (refreshTokenBody) {
+      try {
+        const decoded = verifyRefreshToken(refreshTokenBody);
+        if (decoded && decoded.jti) {
+          await RefreshToken.deleteOne({ user: userId, jti: decoded.jti });
+        }
+      } catch (_) {
+        // Token invalid/expired - nothing to revoke
+      }
+    }
+
     // Step 1: Remove FCM token to stop receiving push notifications
     await removeFcmToken(userId);
 

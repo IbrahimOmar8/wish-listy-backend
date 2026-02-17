@@ -14,6 +14,7 @@ router.post('/resend-otp', authController.resendOTP);
 router.post('/verify-success', authController.verifySuccess);
 router.post('/login', authController.verifyPasswordAndLogin);
 router.post('/check-account', authController.checkAccount);
+router.post('/refresh', authController.refreshToken);
 router.post('/request-reset', authController.requestPasswordReset);
 router.patch('/reset-password', authController.resetPassword);
 router.patch('/change-password', protect, authController.changePassword);
