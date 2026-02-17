@@ -837,8 +837,8 @@ exports.updateItemStatus = async (req, res) => {
 /**
  * Mark item as not received (dispute purchase) - Owner only.
  * PUT /api/items/:id/not-received
- * Reverts item from purchased back to reserved (clears isPurchased, purchasedBy, purchasedAt).
- * Notifies the user who marked it as purchased.
+ * Full reset: clears purchase and reservation so the item is available again.
+ * Notifies the previous buyer so they know their purchase was disputed.
  */
 exports.markAsNotReceived = async (req, res) => {
   try {
@@ -884,10 +884,25 @@ exports.markAsNotReceived = async (req, res) => {
     const purchaserId = item.purchasedBy ? (item.purchasedBy._id || item.purchasedBy) : null;
     const wishlistId = item.wishlist._id || item.wishlist;
 
+    // Full reset: no buyer, no reserver — item becomes available
     await Item.findByIdAndUpdate(id, {
-      $set: { isPurchased: false },
-      $unset: { purchasedBy: 1, purchasedAt: 1 }
+      $set: {
+        isPurchased: false,
+        reservationReminderSent: false,
+        extensionCount: 0
+      },
+      $unset: {
+        purchasedBy: 1,
+        purchasedAt: 1,
+        reservedUntil: 1
+      }
     });
+
+    // Cancel all reservations for this item so no one holds a reservation
+    await Reservation.updateMany(
+      { item: id, status: 'reserved' },
+      { $set: { status: 'cancelled' } }
+    );
 
     if (purchaserId && wishlistId) {
       await createNotification({
