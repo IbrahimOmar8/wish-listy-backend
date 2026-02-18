@@ -26,6 +26,50 @@ const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const phoneRegex = /^\+?[0-9]{7,15}$/;
 
 /**
+ * Normalize phone to canonical form for storage and lookup (e.g. 201XXXXXXXXX for Egypt).
+ * Strips +, spaces, etc.; converts 01X... (11 digits) to 201X...
+ */
+function normalizePhoneForAuth(phoneStr) {
+  if (!phoneStr || typeof phoneStr !== 'string') return phoneStr;
+  const digitsOnly = phoneStr.replace(/\D/g, '');
+  if (digitsOnly.length === 0) return phoneStr.trim().toLowerCase();
+  if (digitsOnly.startsWith('01') && digitsOnly.length === 11) {
+    return '2' + digitsOnly;
+  }
+  if (digitsOnly.startsWith('201') && digitsOnly.length === 12) {
+    return digitsOnly;
+  }
+  return digitsOnly;
+}
+
+/**
+ * Normalize username (email or phone) for auth lookups and storage.
+ * Phones: canonical digits (201...); emails: lowercase trim.
+ */
+function normalizeUsernameForAuth(username) {
+  if (!username || typeof username !== 'string') return username;
+  const trimmed = username.trim().toLowerCase();
+  if (/^[+\d\s\-()]+$/.test(username)) {
+    return normalizePhoneForAuth(trimmed);
+  }
+  return trimmed;
+}
+
+/**
+ * Build find query for username with legacy format fallback (01X... vs 201X...).
+ */
+function buildUsernameFindQuery(normalized, rawInput) {
+  const legacyFormat = normalized.startsWith('201') ? '0' + normalized.substring(2) : null;
+  const orConditions = [{ username: normalized }];
+  if (legacyFormat && legacyFormat !== normalized) orConditions.push({ username: legacyFormat });
+  if (rawInput) {
+    const raw = rawInput.trim().toLowerCase();
+    if (raw && raw !== normalized && (!legacyFormat || raw !== legacyFormat)) orConditions.push({ username: raw });
+  }
+  return orConditions.length > 1 ? { $or: orConditions } : { username: normalized };
+}
+
+/**
  * Generate access + refresh tokens and persist refresh token in DB (for revocation / logout all).
  * @param {mongoose.Types.ObjectId} userId
  * @returns {{ token: string, refreshToken: string }}
@@ -56,9 +100,8 @@ exports.requestPasswordReset = async (req, res) => {
       });
     }
 
-    // Find user by username (which can be phone or username)
-    const searchValue = identifier.toLowerCase().trim();
-    const user = await User.findOne({ username: searchValue });
+    const searchValue = normalizeUsernameForAuth(identifier);
+    const user = await User.findOne(buildUsernameFindQuery(searchValue, identifier));
 
     if (!user) {
       return res.status(404).json({
@@ -329,14 +372,9 @@ exports.checkAccount = async (req, res) => {
       });
     }
 
-    // Search in username field (username can be email or phone)
-    // Normalize: lowercase and trim (same as login/register)
-    const searchValue = username.toLowerCase().trim();
-    
-    // Find user by username (exact match, same as login)
-    const user = await User.findOne({ 
-      username: searchValue
-    }).select('username email');
+    // Normalize so +20..., 01..., 201... all match; support legacy 01X... in DB
+    const searchValue = normalizeUsernameForAuth(username);
+    const user = await User.findOne(buildUsernameFindQuery(searchValue, username)).select('username email');
 
     // If user not found
     if (!user) {
@@ -378,26 +416,8 @@ exports.verifyPasswordAndLogin = async (req, res) => {
       });
     }
 
-    // Normalize username for database search (same as register function)
-    // For emails: lowercase and trim
-    // For phones: remove spaces, dashes, parentheses, then lowercase
-    let normalizedUsername = username.trim();
-    const normalizedPhoneForValidation = normalizedUsername.replace(/[\s\-()]/g, '');
-    
-    const isValidEmail = emailRegex.test(normalizedUsername);
-    const isValidPhone = phoneRegex.test(normalizedPhoneForValidation);
-    
-    if (isValidEmail) {
-      normalizedUsername = normalizedUsername.toLowerCase();
-    } else if (isValidPhone) {
-      normalizedUsername = normalizedPhoneForValidation.toLowerCase();
-    } else {
-      // If neither email nor phone format, still normalize (lowercase and trim)
-      normalizedUsername = normalizedUsername.toLowerCase();
-    }
-
-    // Find user by normalized username
-    const user = await User.findOne({ username: normalizedUsername }).select('+password');
+    const normalizedUsername = normalizeUsernameForAuth(username);
+    const user = await User.findOne(buildUsernameFindQuery(normalizedUsername, username)).select('+password');
 
     if (!user) {
       return res.status(400).json({
@@ -505,24 +525,8 @@ exports.verifyOTP = async (req, res) => {
       });
     }
 
-    // Normalize username (same logic as register/login: supports email or phone)
-    let normalizedUsername = username.trim();
-    const normalizedPhoneForValidation = normalizedUsername.replace(/[\s\-()]/g, '');
-
-    const isValidEmail = emailRegex.test(normalizedUsername);
-    const isValidPhone = phoneRegex.test(normalizedPhoneForValidation);
-
-    if (isValidEmail) {
-      normalizedUsername = normalizedUsername.toLowerCase();
-    } else if (isValidPhone) {
-      normalizedUsername = normalizedPhoneForValidation.toLowerCase();
-    } else {
-      // Fallback: lowercase + trim
-      normalizedUsername = normalizedUsername.toLowerCase();
-    }
-
-    // Find user with OTP field included using normalized username
-    const user = await User.findOne({ username: normalizedUsername }).select('+otp');
+    const normalizedUsername = normalizeUsernameForAuth(username);
+    const user = await User.findOne(buildUsernameFindQuery(normalizedUsername, username)).select('+otp');
 
     if (!user) {
       return res.status(404).json({
@@ -619,12 +623,10 @@ exports.resendOTP = async (req, res) => {
       });
     }
 
-    // Normalize username (same logic as register / verifyOTP)
-    let normalizedUsername = username.trim();
-    const normalizedPhoneForValidation = normalizedUsername.replace(/[\s\-()]/g, '');
-    const isValidEmail = emailRegex.test(normalizedUsername);
-    const isValidPhone = phoneRegex.test(normalizedPhoneForValidation);
-
+    const trimmed = username.trim();
+    const forPhoneCheck = trimmed.replace(/[\s\-()]/g, '');
+    const isValidEmail = emailRegex.test(trimmed);
+    const isValidPhone = phoneRegex.test(forPhoneCheck);
     if (!isValidEmail && !isValidPhone) {
       return res.status(400).json({
         success: false,
@@ -632,15 +634,8 @@ exports.resendOTP = async (req, res) => {
       });
     }
 
-    if (isValidEmail) {
-      normalizedUsername = normalizedUsername.toLowerCase();
-    } else if (isValidPhone) {
-      normalizedUsername = normalizedPhoneForValidation.toLowerCase();
-    } else {
-      normalizedUsername = normalizedUsername.toLowerCase();
-    }
-
-    const user = await User.findOne({ username: normalizedUsername });
+    const normalizedUsername = normalizeUsernameForAuth(username);
+    const user = await User.findOne(buildUsernameFindQuery(normalizedUsername, username));
 
     if (!user) {
       return res.status(404).json({
@@ -835,13 +830,10 @@ exports.register = async (req, res) => {
     }
 
     // Normalize username for database storage and searching
-    // For emails: lowercase and trim
-    // For phones: remove spaces, dashes, parentheses, then lowercase
     if (isValidEmail) {
       normalizedUsername = normalizedUsername.toLowerCase();
     } else if (isValidPhone) {
-      // Normalize phone: remove spaces, dashes, parentheses (matching Flutter normalizePhoneNumber)
-      normalizedUsername = normalizedPhoneForValidation.toLowerCase();
+      normalizedUsername = normalizePhoneForAuth(normalizedPhoneForValidation);
     }
 
     // Validate password
@@ -852,9 +844,9 @@ exports.register = async (req, res) => {
       });
     }
     
-    // Check if user already exists (using normalized username)
+    // Check if user already exists (normalized + legacy 01X... so we don't duplicate)
     console.log(`🔍 Searching for existing user with normalized username: ${normalizedUsername}`);
-    const existingUser = await User.findOne({ username: normalizedUsername });
+    const existingUser = await User.findOne(buildUsernameFindQuery(normalizedUsername, username));
 
     // If user exists, check verification status
     if (existingUser) {
