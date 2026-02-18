@@ -116,20 +116,25 @@ exports.getFriendWishlists = async (req, res) => {
   try {
     const { friendUserId } = req.params;
     const currentUserId = req.user.id;
+    const isViewerOwner = currentUserId.toString() === friendUserId.toString();
 
-    // Check friendship status
-    const isFriend = await checkFriendshipStatus(currentUserId, friendUserId);
+    let query;
+    if (isViewerOwner) {
+      // Viewer is owner: return ALL wishlists (public, friends, private)
+      query = { owner: friendUserId };
+    } else {
+      // Viewer is not owner: apply privacy (public, and friends-only if they are friends)
+      const isFriend = await checkFriendshipStatus(currentUserId, friendUserId);
+      query = {
+        owner: friendUserId,
+        $or: [
+          { privacy: 'public' },
+          ...(isFriend ? [{ privacy: 'friends' }] : []),
+        ],
+      };
+    }
 
-    // Build query based on privacy rules
-    const privacyQuery = {
-      owner: friendUserId,
-      $or: [
-        { privacy: 'public' },
-        ...(isFriend ? [{ privacy: 'friends' }] : []),
-      ],
-    };
-
-    const wishlists = await Wishlist.find(privacyQuery)
+    const wishlists = await Wishlist.find(query)
       .populate('owner', 'fullName username profileImage')
       .select('name description privacy category createdAt items')
       .sort({ createdAt: -1 });

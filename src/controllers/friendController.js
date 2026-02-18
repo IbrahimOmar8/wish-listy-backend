@@ -399,14 +399,15 @@ exports.getFriendSuggestions = async (req, res) => {
       excludedUserIds.add(req.to.toString());
     });
 
-    const excludedIdsArray = Array.from(excludedUserIds).map(id => new mongoose.Types.ObjectId(id));
+    const excludedIdsArray = Array.from(excludedUserIds);
+    const formattedExcludedIds = excludedIdsArray.map(id => new mongoose.Types.ObjectId(id.toString()));
 
     // Step 3: Use MongoDB Aggregation Pipeline for efficient mutual friends calculation
     const suggestions = await User.aggregate([
-      // Stage 1: Filter out excluded users
+      // Stage 1: Filter out excluded users (ObjectIds only so $nin matches _id type)
       {
         $match: {
-          _id: { $nin: excludedIdsArray }
+          _id: { $nin: formattedExcludedIds }
         }
       },
       
