@@ -34,7 +34,15 @@ const notificationSchema = new mongoose.Schema({
   },
   message: {
     type: String,
-    required: true
+    default: null
+  },
+  messageKey: {
+    type: String,
+    default: null
+  },
+  messageVariables: {
+    type: mongoose.Schema.Types.Mixed,
+    default: null
   },
   relatedUser: {
     type: mongoose.Schema.Types.ObjectId,

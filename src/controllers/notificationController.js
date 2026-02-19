@@ -1,5 +1,6 @@
 const Notification = require('../models/Notification');
 const User = require('../models/User');
+const { resolveNotificationMessage, getLanguageFromHeaders } = require('../utils/notificationHelper');
 
 // Get all notifications for the current user
 exports.getNotifications = async (req, res) => {
@@ -39,12 +40,20 @@ exports.getNotifications = async (req, res) => {
     }
     const unreadCount = await Notification.countDocuments(unreadQuery);
 
+    // On-the-fly translation from request headers
+    const lang = getLanguageFromHeaders(req);
+    const data = notifications.map((n) => {
+      const obj = n.toObject ? n.toObject() : n;
+      obj.message = resolveNotificationMessage(obj, lang);
+      return obj;
+    });
+
     res.status(200).json({
       success: true,
-      count: notifications.length,
+      count: data.length,
       total,
       unreadCount,
-      data: notifications
+      data
     });
   } catch (error) {
     console.error('Get notifications error:', error);
@@ -95,10 +104,15 @@ exports.markAsRead = async (req, res) => {
       });
     }
 
+    // On-the-fly translation from request headers
+    const lang = getLanguageFromHeaders(req);
+    const data = notification.toObject ? notification.toObject() : notification;
+    data.message = resolveNotificationMessage(data, lang);
+
     res.status(200).json({
       success: true,
       message: 'Notification marked as read',
-      data: notification
+      data
     });
   } catch (error) {
     console.error('Mark notification as read error:', error);

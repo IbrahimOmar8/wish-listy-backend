@@ -71,59 +71,30 @@ async function createNotification({
   socketIo = null
 }) {
   try {
-    // Determine the final message: use localization if messageKey is provided, otherwise use direct message
-    let finalMessage = message;
-    
+    // For storage: save messageKey + messageVariables (on-the-fly translation at fetch time)
+    // Optionally save fallback message in English for FCM/Socket push and legacy clients
+    let fallbackMessage = message;
     if (messageKey) {
       try {
-        // Fetch recipient to get their preferred language
-        const recipient = await User.findById(recipientId).select('preferredLanguage');
-        const lng = (recipient && recipient.preferredLanguage) || 'en';
-        
-        // Ensure i18next is initialized (should be done by middleware, but safety check)
-        if (!i18next.isInitialized) {
-          console.warn('i18next not initialized, falling back to default message');
-          // Fallback: try to get translation anyway (it may still work)
-        }
-        
-        // Get translation function for recipient's language
-        const t = i18next.getFixedT(lng);
-        
-        // Generate localized message with variables
-        finalMessage = t(messageKey, messageVariables);
-        
-        // If translation fails and returns the key, fallback to direct message
-        if (finalMessage === messageKey && message) {
-          console.warn(`Translation key '${messageKey}' not found for language '${lng}', using fallback message`);
-          finalMessage = message;
-        }
-      } catch (error) {
-        console.error('Error generating localized notification message:', error);
-        // Fallback to direct message if localization fails
-        if (message) {
-          finalMessage = message;
-        } else {
-          // Last resort: use the messageKey as message
-          finalMessage = messageKey;
-        }
+        const t = i18next.getFixedT('en');
+        fallbackMessage = t(messageKey, messageVariables);
+        if (fallbackMessage === messageKey && message) fallbackMessage = message;
+      } catch (_) {
+        fallbackMessage = message || title || messageKey;
       }
     }
-    
-    // Ensure we have a message
-    if (!finalMessage) {
-      console.error('Warning: Notification created without message. Type:', type);
-      finalMessage = title; // Fallback to title if no message provided
-    }
-    
-    // Create notification in database
+    if (!fallbackMessage) fallbackMessage = title || 'Notification';
+
     const notification = await Notification.create({
-      user: recipientId,        // Recipient (who gets the alert)
-      relatedUser: senderId,    // Sender (who triggered it - nullable for privacy)
+      user: recipientId,
+      relatedUser: senderId,
       type,
       title,
-      message: finalMessage,
+      message: fallbackMessage,
+      messageKey: messageKey || undefined,
+      messageVariables: (messageKey && Object.keys(messageVariables || {}).length > 0) ? messageVariables : undefined,
       relatedId,
-      relatedWishlistId         // Wishlist ID for Item-related notifications (enables smart navigation)
+      relatedWishlistId
     });
 
     // Populate relatedUser if senderId is provided
@@ -202,7 +173,7 @@ async function createNotification({
 
         await sendPushNotification(recipientId, {
           title: title,
-          body: finalMessage,
+          body: fallbackMessage,
           data: {
             type: type,
             notificationId: notification._id.toString(),
@@ -229,8 +200,44 @@ async function createNotification({
   }
 }
 
+/**
+ * Resolve notification message for a given language (on-the-fly translation).
+ * Uses messageKey + messageVariables if present; otherwise falls back to stored message.
+ */
+function resolveNotificationMessage(notification, lng) {
+  if (notification.messageKey) {
+    try {
+      const t = i18next.getFixedT(lng);
+      const msg = t(notification.messageKey, notification.messageVariables || {});
+      return (msg === notification.messageKey && notification.message) ? notification.message : msg;
+    } catch (_) {
+      return notification.message || notification.title || 'Notification';
+    }
+  }
+  return notification.message || notification.title || 'Notification';
+}
+
+/**
+ * Parse preferred language from request headers (Content-Language or Accept-Language).
+ */
+function getLanguageFromHeaders(req) {
+  const contentLang = req.headers['content-language'];
+  if (contentLang) {
+    const first = contentLang.split(',')[0].trim();
+    return first.split('-')[0].toLowerCase() || 'en';
+  }
+  const acceptLang = req.headers['accept-language'];
+  if (acceptLang) {
+    const first = acceptLang.split(',')[0].trim();
+    return first.split('-')[0].toLowerCase() || 'en';
+  }
+  return 'en';
+}
+
 module.exports = {
   createNotification,
   getUnreadCountWithBadge,
-  isUserOnline
+  isUserOnline,
+  resolveNotificationMessage,
+  getLanguageFromHeaders
 };
