@@ -11,7 +11,7 @@
     "login_success": "تم تسجيل الدخول بنجاح",
     "login_failed": "فشل تسجيل الدخول",
     "user_not_found": "المستخدم غير موجود",
-    "invalid_credentials": "بيانات الدخول غير صحيحة",
+    "invalid_credentials": "البريد الإلكتروني/الهاتف أو كلمة المرور غير صحيحة",
     "invalid_password": "كلمة المرور غير صحيحة",
     "username_password_required": "اسم المستخدم وكلمة المرور مطلوبان",
     "registration_success": "تم تسجيل المستخدم بنجاح",

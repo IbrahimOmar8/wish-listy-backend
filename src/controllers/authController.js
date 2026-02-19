@@ -420,9 +420,10 @@ exports.verifyPasswordAndLogin = async (req, res) => {
     const user = await User.findOne(buildUsernameFindQuery(normalizedUsername, username)).select('+password');
 
     if (!user) {
-      return res.status(400).json({
+      console.log(`Login failed: user not found for username (normalized): ${normalizedUsername}`);
+      return res.status(401).json({
         success: false,
-        message: req.t('auth.user_not_found')
+        message: req.t ? req.t('auth.invalid_credentials') : 'Invalid email/phone or password.'
       });
     }
 
@@ -430,9 +431,10 @@ exports.verifyPasswordAndLogin = async (req, res) => {
     const isMatch = await user.comparePassword(password);
 
     if (!isMatch) {
-      return res.status(400).json({
+      console.log(`Login failed: invalid password for user ${user._id}`);
+      return res.status(401).json({
         success: false,
-        message: req.t('auth.invalid_password')
+        message: req.t ? req.t('auth.invalid_credentials') : 'Invalid email/phone or password.'
       });
     }
 
