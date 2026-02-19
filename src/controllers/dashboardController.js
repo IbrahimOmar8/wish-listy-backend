@@ -81,8 +81,11 @@ exports.getHomeData = async (req, res) => {
       // Time constraint: Only activities from the last 15 days
       const fifteenDaysAgo = new Date(now.getTime() - (15 * 24 * 60 * 60 * 1000));
 
-      // Get wishlist IDs owned by friends with owner info
-      const friendWishlists = await Wishlist.find({ owner: { $in: friendIds } })
+      // Get wishlist IDs owned by friends - exclude private (only public/friends visible to friends)
+      const friendWishlists = await Wishlist.find({
+        owner: { $in: friendIds },
+        privacy: { $in: ['public', 'friends'] }
+      })
         .select('_id owner name')
         .populate({
           path: 'owner',

@@ -222,8 +222,14 @@ exports.getUserProfile = async (req, res) => {
       });
     }
 
-    // Wishlist count: always total by owner
-    const wishlistCount = await Wishlist.countDocuments({ owner: id });
+    // Wishlist count: own profile = total; other's profile = only public/friends
+    const isOwnProfile = currentUserId.toString() === id.toString();
+    const wishlistCount = isOwnProfile
+      ? await Wishlist.countDocuments({ owner: id })
+      : await Wishlist.countDocuments({
+          owner: id,
+          privacy: { $in: ['public', 'friends'] }
+        });
 
     // Events count: same logic as GET /users/:id/events — own profile = all events; friend profile = invited OR public
     let eventsCount;

@@ -311,7 +311,8 @@ exports.getMyFriends = async (req, res) => {
     const wishlistCounts = await Wishlist.aggregate([
       {
         $match: {
-          owner: { $in: friendIds }
+          owner: { $in: friendIds },
+          privacy: { $in: ['public', 'friends'] }
         }
       },
       {

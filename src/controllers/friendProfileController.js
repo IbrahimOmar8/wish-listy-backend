@@ -73,9 +73,12 @@ exports.getFriendProfile = async (req, res) => {
     // Get detailed friendship status
     const friendshipStatus = await getFriendshipStatus(currentUserId, friendUserId);
 
-    // Get counts
+    // Get counts (exclude private wishlists when viewing another user's profile)
     const [wishlistCount, eventCount, friendCount] = await Promise.all([
-      Wishlist.countDocuments({ owner: friendUserId }),
+      Wishlist.countDocuments({
+        owner: friendUserId,
+        privacy: { $in: ['public', 'friends'] }
+      }),
       Event.countDocuments({ creator: friendUserId }),
       User.findById(friendUserId).select('friends').then(u => u.friends.length),
     ]);
