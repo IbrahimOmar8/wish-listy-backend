@@ -26,25 +26,106 @@ const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const phoneRegex = /^\+?[0-9]{7,15}$/;
 
 /**
- * Normalize phone to canonical form for storage and lookup (e.g. 201XXXXXXXXX for Egypt).
- * Strips +, spaces, etc.; converts 01X... (11 digits) to 201X...
+ * Map ISO 3166-1 alpha-2 country codes to dial codes (without +).
  */
-function normalizePhoneForAuth(phoneStr) {
-  if (!phoneStr || typeof phoneStr !== 'string') return phoneStr;
-  const digitsOnly = phoneStr.replace(/\D/g, '');
-  if (digitsOnly.length === 0) return phoneStr.trim().toLowerCase();
-  if (digitsOnly.startsWith('01') && digitsOnly.length === 11) {
-    return '2' + digitsOnly;
-  }
-  if (digitsOnly.startsWith('201') && digitsOnly.length === 12) {
-    return digitsOnly;
-  }
-  return digitsOnly;
+const COUNTRY_TO_DIAL = {
+  EG: '20', SA: '966', AE: '971', QA: '974', KW: '965', BH: '973', OM: '968',
+  JO: '962', LB: '961', US: '1', GB: '44', FR: '33', DE: '49', IN: '91'
+};
+
+/**
+ * Parse country_code from request (accepts "+966", "966", "SA").
+ */
+function parseCountryDialCode(countryCode) {
+  if (!countryCode || typeof countryCode !== 'string') return null;
+  const s = countryCode.trim();
+  if (/^\+\d{1,4}$/.test(s)) return s.slice(1);
+  if (/^\d{1,4}$/.test(s)) return s;
+  const upper = s.toUpperCase();
+  return COUNTRY_TO_DIAL[upper] || null;
 }
 
 /**
- * Normalize username (email or phone) for auth lookups and storage.
- * Phones: canonical digits (201...); emails: lowercase trim.
+ * Normalize phone digits: strip non-digits, convert Egypt 01X (11 digits) to 201X.
+ */
+function normalizePhoneDigits(phoneStr) {
+  if (!phoneStr || typeof phoneStr !== 'string') return '';
+  const digits = phoneStr.replace(/\D/g, '');
+  if (digits.startsWith('01') && digits.length === 11) return '2' + digits;
+  if (digits.startsWith('201') && digits.length === 12) return digits;
+  return digits;
+}
+
+/**
+ * Get canonical phone for STORAGE (E.164 with leading +).
+ * Used at registration to ensure consistent DB format.
+ * @param {string} phoneStr - Raw phone input
+ * @param {string} [countryCode] - Optional: "+966", "966", or "SA"
+ */
+function getCanonicalPhoneForStorage(phoneStr, countryCode) {
+  const digits = phoneStr.replace(/\D/g, '');
+  if (!digits.length) return null;
+
+  const dial = parseCountryDialCode(countryCode);
+
+  if (digits.startsWith('01') && digits.length === 11) {
+    return '+2' + digits;
+  }
+  if (digits.startsWith('201') && digits.length === 12) {
+    return '+' + digits;
+  }
+  if (dial) {
+    const local = digits.startsWith(dial) ? digits : dial + digits;
+    return '+' + local;
+  }
+  const normalized = normalizePhoneDigits(phoneStr);
+  return normalized ? '+' + normalized : '+' + digits;
+}
+
+/**
+ * Get all possible username variants for DB search (including legacy formats and + sign).
+ * Ensures we find users whether DB stored "201...", "010...", or "+201...".
+ */
+function getPhoneSearchVariants(phoneStr, countryCode) {
+  const digits = phoneStr.replace(/\D/g, '');
+  if (!digits.length) return [];
+
+  const dial = parseCountryDialCode(countryCode);
+  const variants = new Set();
+
+  if (digits.startsWith('01') && digits.length === 11) {
+    const full = '2' + digits;
+    variants.add(full);
+    variants.add(digits);
+    variants.add('+' + full);
+  } else if (digits.startsWith('201') && digits.length === 12) {
+    variants.add(digits);
+    variants.add('0' + digits.substring(2));
+    variants.add('+' + digits);
+  } else if (dial) {
+    const local = digits.startsWith(dial) ? digits : dial + digits;
+    variants.add(local);
+    variants.add('+' + local);
+    if (digits.length >= 9) variants.add(digits);
+  } else {
+    variants.add(digits);
+    variants.add('+' + digits);
+  }
+
+  return Array.from(variants);
+}
+
+/**
+ * Normalize phone for auth (returns primary digits form for backward compat).
+ */
+function normalizePhoneForAuth(phoneStr) {
+  if (!phoneStr || typeof phoneStr !== 'string') return phoneStr;
+  const digits = normalizePhoneDigits(phoneStr);
+  return digits || phoneStr.trim().toLowerCase();
+}
+
+/**
+ * Normalize username (email or phone) for auth lookups.
  */
 function normalizeUsernameForAuth(username) {
   if (!username || typeof username !== 'string') return username;
@@ -56,9 +137,21 @@ function normalizeUsernameForAuth(username) {
 }
 
 /**
- * Build find query for username with legacy format fallback (01X... vs 201X...).
+ * Build find query for username. For phones, searches all variants (01X, 201X, +201X).
+ * @param {string} normalized - Normalized username (digits for phone)
+ * @param {string} rawInput - Raw username from request
+ * @param {{ country_code?: string, isPhone?: boolean }} [options] - Optional country_code and isPhone flag
  */
-function buildUsernameFindQuery(normalized, rawInput) {
+function buildUsernameFindQuery(normalized, rawInput, options = {}) {
+  const { country_code: countryCode, isPhone } = options;
+
+  if (isPhone || (/^\d+$/.test(normalized) && normalized.length >= 9)) {
+    const variants = getPhoneSearchVariants(rawInput || normalized, countryCode);
+    if (variants.length > 0) {
+      return { username: { $in: variants } };
+    }
+  }
+
   const legacyFormat = normalized.startsWith('201') ? '0' + normalized.substring(2) : null;
   const orConditions = [{ username: normalized }];
   if (legacyFormat && legacyFormat !== normalized) orConditions.push({ username: legacyFormat });
@@ -90,7 +183,7 @@ async function createTokensForUser(userId) {
  */
 exports.requestPasswordReset = async (req, res) => {
   try {
-    const { identifier, newEmail } = req.body;
+    const { identifier, newEmail, country_code } = req.body;
 
     // Validate identifier is provided
     if (!identifier) {
@@ -101,7 +194,8 @@ exports.requestPasswordReset = async (req, res) => {
     }
 
     const searchValue = normalizeUsernameForAuth(identifier);
-    const user = await User.findOne(buildUsernameFindQuery(searchValue, identifier));
+    const isPhone = /^[+\d\s\-()]+$/.test((identifier || '').trim());
+    const user = await User.findOne(buildUsernameFindQuery(searchValue, identifier, { country_code, isPhone }));
 
     if (!user) {
       return res.status(404).json({
@@ -362,7 +456,7 @@ exports.changePassword = async (req, res) => {
  */
 exports.checkAccount = async (req, res) => {
   try {
-    const { username } = req.body;
+    const { username, country_code } = req.body;
 
     // Validate that username is provided
     if (!username) {
@@ -372,9 +466,9 @@ exports.checkAccount = async (req, res) => {
       });
     }
 
-    // Normalize so +20..., 01..., 201... all match; support legacy 01X... in DB
     const searchValue = normalizeUsernameForAuth(username);
-    const user = await User.findOne(buildUsernameFindQuery(searchValue, username)).select('username email');
+    const isPhone = /^[+\d\s\-()]+$/.test((username || '').trim());
+    const user = await User.findOne(buildUsernameFindQuery(searchValue, username, { country_code, isPhone })).select('username email');
 
     // If user not found
     if (!user) {
@@ -407,7 +501,7 @@ exports.checkAccount = async (req, res) => {
 
 exports.verifyPasswordAndLogin = async (req, res) => {
   try {
-    const { username, password, fcmToken } = req.body;
+    const { username, password, fcmToken, country_code } = req.body;
 
     if (!username || !password) {
       return res.status(400).json({
@@ -417,7 +511,8 @@ exports.verifyPasswordAndLogin = async (req, res) => {
     }
 
     const normalizedUsername = normalizeUsernameForAuth(username);
-    const user = await User.findOne(buildUsernameFindQuery(normalizedUsername, username)).select('+password');
+    const isPhone = /^[+\d\s\-()]+$/.test((username || '').trim());
+    const user = await User.findOne(buildUsernameFindQuery(normalizedUsername, username, { country_code, isPhone })).select('+password');
 
     if (!user) {
       console.log(`Login failed: user not found for username (normalized): ${normalizedUsername}`);
@@ -517,7 +612,7 @@ exports.verifyPasswordAndLogin = async (req, res) => {
  */
 exports.verifyOTP = async (req, res) => {
   try {
-    const { username, otp } = req.body;
+    const { username, otp, country_code } = req.body;
 
     // Validation
     if (!username || !otp) {
@@ -528,7 +623,8 @@ exports.verifyOTP = async (req, res) => {
     }
 
     const normalizedUsername = normalizeUsernameForAuth(username);
-    const user = await User.findOne(buildUsernameFindQuery(normalizedUsername, username)).select('+otp');
+    const isPhone = /^[+\d\s\-()]+$/.test((username || '').trim());
+    const user = await User.findOne(buildUsernameFindQuery(normalizedUsername, username, { country_code, isPhone })).select('+otp');
 
     if (!user) {
       return res.status(404).json({
@@ -616,7 +712,7 @@ exports.verifyOTP = async (req, res) => {
  */
 exports.resendOTP = async (req, res) => {
   try {
-    const { username } = req.body;
+    const { username, country_code } = req.body;
 
     if (!username || typeof username !== 'string' || !username.trim()) {
       return res.status(400).json({
@@ -637,7 +733,8 @@ exports.resendOTP = async (req, res) => {
     }
 
     const normalizedUsername = normalizeUsernameForAuth(username);
-    const user = await User.findOne(buildUsernameFindQuery(normalizedUsername, username));
+    const isPhone = isValidPhone;
+    const user = await User.findOne(buildUsernameFindQuery(normalizedUsername, username, { country_code, isPhone }));
 
     if (!user) {
       return res.status(404).json({
@@ -790,7 +887,7 @@ exports.verifySuccess = async (req, res) => {
 
 exports.register = async (req, res) => {
   try {
-    const { fullName, username, password } = req.body;
+    const { fullName, username, password, country_code } = req.body;
 
     // Validation
     if (!fullName || !username || !password) {
@@ -831,11 +928,11 @@ exports.register = async (req, res) => {
       });
     }
 
-    // Normalize username for database storage and searching
+    // Normalize username for database storage (canonical E.164 with + for phones)
     if (isValidEmail) {
       normalizedUsername = normalizedUsername.toLowerCase();
     } else if (isValidPhone) {
-      normalizedUsername = normalizePhoneForAuth(normalizedPhoneForValidation);
+      normalizedUsername = getCanonicalPhoneForStorage(normalizedPhoneForValidation, country_code) || normalizedPhoneForValidation;
     }
 
     // Validate password
@@ -846,9 +943,9 @@ exports.register = async (req, res) => {
       });
     }
     
-    // Check if user already exists (normalized + legacy 01X... so we don't duplicate)
+    // Check if user already exists (search all phone variants)
     console.log(`🔍 Searching for existing user with normalized username: ${normalizedUsername}`);
-    const existingUser = await User.findOne(buildUsernameFindQuery(normalizedUsername, username));
+    const existingUser = await User.findOne(buildUsernameFindQuery(normalizedUsername, username, { country_code, isPhone: isValidPhone }));
 
     // If user exists, check verification status
     if (existingUser) {
