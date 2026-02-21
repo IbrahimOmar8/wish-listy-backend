@@ -3,6 +3,10 @@ const FriendRequest = require('../models/FriendRequest');
 const User = require('../models/User');
 const Notification = require('../models/Notification');
 const Wishlist = require('../models/Wishlist');
+const Event = require('../models/Event');
+const EventInvitation = require('../models/Eventinvitation');
+const Item = require('../models/Item');
+const Reservation = require('../models/Reservation');
 const { createNotification, getUnreadCountWithBadge } = require('../utils/notificationHelper');
 
 // Send friend request
@@ -674,13 +678,13 @@ exports.cancelFriendRequest = async (req, res) => {
   }
 };
 
-// Remove friend (Unfriend)
+// Remove friend (Unfriend) - Cascading cleanup for Event Invitations, Reservations, Notifications
 exports.removeFriend = async (req, res) => {
-  try {
-    const { friendId } = req.params;
-    const currentUserId = req.user.id;
+  const { friendId } = req.params;
+  const currentUserId = req.user.id;
+  let session;
 
-    // Validation: Check if friendId is provided
+  try {
     if (!friendId) {
       return res.status(400).json({
         success: false,
@@ -688,7 +692,6 @@ exports.removeFriend = async (req, res) => {
       });
     }
 
-    // Validation: Cannot unfriend yourself
     if (currentUserId === friendId) {
       return res.status(400).json({
         success: false,
@@ -696,7 +699,6 @@ exports.removeFriend = async (req, res) => {
       });
     }
 
-    // Check if friend exists
     const friend = await User.findById(friendId);
     if (!friend) {
       return res.status(404).json({
@@ -705,7 +707,6 @@ exports.removeFriend = async (req, res) => {
       });
     }
 
-    // Get current user to check friendship
     const currentUser = await User.findById(currentUserId).select('friends');
     if (!currentUser) {
       return res.status(404).json({
@@ -714,10 +715,9 @@ exports.removeFriend = async (req, res) => {
       });
     }
 
-    // Check if friendship exists
     const friendIdString = friendId.toString();
     const isFriend = currentUser.friends.some(
-      friend => friend.toString() === friendIdString
+      f => f.toString() === friendIdString
     );
 
     if (!isFriend) {
@@ -727,19 +727,22 @@ exports.removeFriend = async (req, res) => {
       });
     }
 
-    // Remove friend from both users' friends arrays (bidirectional removal)
+    session = await mongoose.startSession();
+    session.startTransaction();
+
+    // 1. Remove friend from both users' friends arrays (bidirectional)
     await User.findByIdAndUpdate(
       currentUserId,
-      { $pull: { friends: friendId } }
+      { $pull: { friends: friendId } },
+      { session }
     );
-
     await User.findByIdAndUpdate(
       friendId,
-      { $pull: { friends: currentUserId } }
+      { $pull: { friends: currentUserId } },
+      { session }
     );
 
-    // Update any accepted friend requests between these users to 'rejected'
-    // This ensures data consistency - if they were friends, any accepted request should be marked as ended
+    // 2. Update accepted friend requests between these users to 'rejected'
     await FriendRequest.updateMany(
       {
         $or: [
@@ -748,14 +751,119 @@ exports.removeFriend = async (req, res) => {
         ],
         status: 'accepted'
       },
-      { status: 'rejected' }
+      { status: 'rejected' },
+      { session }
     );
+
+    // 3. Event Invitations: Delete pending/accepted/maybe invitations between the two users
+    await EventInvitation.deleteMany(
+      {
+        $or: [
+          { inviter: currentUserId, invitee: friendId },
+          { inviter: friendId, invitee: currentUserId }
+        ],
+        status: { $in: ['pending', 'accepted', 'maybe'] }
+      },
+      { session }
+    );
+
+    // Remove ex-friend from Event.invited_friends for events created by either user
+    await Event.updateMany(
+      { creator: currentUserId },
+      { $pull: { invited_friends: { user: friendId } } },
+      { session }
+    );
+    await Event.updateMany(
+      { creator: friendId },
+      { $pull: { invited_friends: { user: currentUserId } } },
+      { session }
+    );
+
+    // 4. Gift Reservations: Cancel reservations where one reserved for the other (reserved only, not purchased)
+    const userAWishlists = await Wishlist.find({ owner: currentUserId }).select('_id').session(session);
+    const userBWishlists = await Wishlist.find({ owner: friendId }).select('_id').session(session);
+    const userAWishlistIds = userAWishlists.map(w => w._id);
+    const userBWishlistIds = userBWishlists.map(w => w._id);
+
+    const itemsA = userAWishlistIds.length > 0
+      ? await Item.find({ wishlist: { $in: userAWishlistIds }, isPurchased: false }).select('_id').session(session)
+      : [];
+    const itemsB = userBWishlistIds.length > 0
+      ? await Item.find({ wishlist: { $in: userBWishlistIds }, isPurchased: false }).select('_id').session(session)
+      : [];
+
+    const itemIdsA = itemsA.map(i => i._id);
+    const itemIdsB = itemsB.map(i => i._id);
+
+    // Get item IDs that have reservations we're about to cancel (only those need Item cleanup)
+    const affectedIds = [];
+    if (itemIdsA.length > 0) {
+      const rB = await Reservation.find({ item: { $in: itemIdsA }, reserver: friendId, status: 'reserved' }).select('item').session(session);
+      affectedIds.push(...rB.map(r => r.item));
+    }
+    if (itemIdsB.length > 0) {
+      const rA = await Reservation.find({ item: { $in: itemIdsB }, reserver: currentUserId, status: 'reserved' }).select('item').session(session);
+      affectedIds.push(...rA.map(r => r.item));
+    }
+
+    // B reserved items on A's wishlists → cancel B's reservations
+    if (itemIdsA.length > 0) {
+      await Reservation.updateMany(
+        { item: { $in: itemIdsA }, reserver: friendId, status: 'reserved' },
+        { $set: { status: 'cancelled' } },
+        { session }
+      );
+    }
+    // A reserved items on B's wishlists → cancel A's reservations
+    if (itemIdsB.length > 0) {
+      await Reservation.updateMany(
+        { item: { $in: itemIdsB }, reserver: currentUserId, status: 'reserved' },
+        { $set: { status: 'cancelled' } },
+        { session }
+      );
+    }
+
+    // Clear Item.reservedUntil for items with no remaining active reservations
+    const allAffectedItemIds = affectedIds;
+    for (const itemId of allAffectedItemIds) {
+      const otherActive = await Reservation.countDocuments({
+        item: itemId,
+        status: 'reserved'
+      }).session(session);
+      if (otherActive === 0) {
+        await Item.findByIdAndUpdate(
+          itemId,
+          { reservedUntil: null, reservationReminderSent: false, extensionCount: 0 },
+          { session }
+        );
+      }
+    }
+
+    // 5. Notifications: Delete notifications between the two users (event invites, reminders, friend requests)
+    await Notification.deleteMany(
+      {
+        $or: [
+          { user: currentUserId, relatedUser: friendId },
+          { user: friendId, relatedUser: currentUserId }
+        ]
+      },
+      { session }
+    );
+
+    await session.commitTransaction();
+    await session.endSession();
 
     res.status(200).json({
       success: true,
       message: 'Friend removed successfully'
     });
   } catch (error) {
+    if (session && session.inTransaction()) {
+      await session.abortTransaction();
+    }
+    if (session) {
+      await session.endSession();
+    }
     console.error('Remove friend error:', error);
     res.status(500).json({
       success: false,
