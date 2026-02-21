@@ -28,6 +28,10 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   // Start reservation expiration cron (auto-cancel expired, 48h reminder)
   const { startReservationCron } = require('./src/services/reservationCron');
   startReservationCron(io);
+
+  // Start event reminder cron (48h before event - runs daily at 08:00, staggered from reservation cron)
+  const { startEventReminderCron } = require('./src/services/eventCron');
+  startEventReminderCron(io);
   
   console.log('✅ Server fully initialized and ready');
 });

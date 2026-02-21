@@ -48,6 +48,9 @@ exports.searchUsers = async (req, res) => {
     const blockedIds = (currentUser && currentUser.blockedUsers) ? currentUser.blockedUsers : [];
     searchQuery._id = { $nin: [currentUserId, ...blockedIds] };
 
+    // Only return verified users (exclude isVerified: false or missing)
+    searchQuery.isVerified = true;
+
     // Search users and return safe fields only
     // INDEXING RECOMMENDATION: For optimal performance, ensure indexes exist on:
     // - fullName (text or regular index)
