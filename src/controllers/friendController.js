@@ -212,11 +212,15 @@ exports.respondToFriendRequest = async (req, res) => {
         socketIo: req.app.get('io')
       });
 
-      // Clear "friend request" notification for receiver so red dot updates
-      await Notification.updateMany(
-        { type: 'friend_request', relatedId: friendRequest._id, user: friendRequest.to._id },
-        { isRead: true }
-      );
+      // Permanently delete the "friend request" notification so it no longer appears in the feed
+      // and User B cannot accidentally click "Accept" again. Targets only this specific notification
+      // (relatedId + user) to avoid affecting other pending friend requests for User B.
+      await Notification.deleteMany({
+        type: 'friend_request',
+        relatedId: friendRequest._id,
+        user: friendRequest.to._id,
+        relatedUser: friendRequest.from._id
+      });
       const receiverUnreadCount = await getUnreadCountWithBadge(friendRequest.to._id);
       if (req.app.get('io')) {
         req.app.get('io').to(friendRequest.to._id.toString()).emit('unread_count_update', { unreadCount: receiverUnreadCount });
@@ -235,11 +239,13 @@ exports.respondToFriendRequest = async (req, res) => {
       // Note: No notification created for rejected requests (by design)
       // Only Socket.IO event is sent for real-time updates
 
-      // Clear "friend request" notification for receiver so red dot updates
-      await Notification.updateMany(
-        { type: 'friend_request', relatedId: friendRequest._id, user: friendRequest.to._id },
-        { isRead: true }
-      );
+      // Permanently delete the "friend request" notification so it no longer appears in the feed.
+      await Notification.deleteMany({
+        type: 'friend_request',
+        relatedId: friendRequest._id,
+        user: friendRequest.to._id,
+        relatedUser: friendRequest.from._id
+      });
       const receiverUnreadCount = await getUnreadCountWithBadge(friendRequest.to._id);
       if (req.app.get('io')) {
         req.app.get('io').to(friendRequest.to._id.toString()).emit('unread_count_update', { unreadCount: receiverUnreadCount });
