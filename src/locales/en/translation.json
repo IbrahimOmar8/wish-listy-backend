@@ -22,6 +22,7 @@
     "username_format": "Username must be a valid email address or phone number",
     "password_required": "Password must be at least 6 characters long",
     "username_exists": "Username already exists",
+    "email_exists": "Email is already in use",
     "logout_success": "Logged out successfully",
     "logout_failed": "Error logging out",
     "get_user_failed": "Failed to get user data",
