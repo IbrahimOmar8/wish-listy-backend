@@ -1,5 +1,6 @@
 const Notification = require('../models/Notification');
 const User = require('../models/User');
+const Wishlist = require('../models/Wishlist');
 const i18next = require('i18next');
 const { sendPushNotification } = require('./pushNotification');
 
@@ -201,6 +202,63 @@ async function createNotification({
 }
 
 /**
+ * Enrich reservation_expired/reservation_cancelled notifications with ownerName and relatedUser
+ * when missing (e.g. legacy notifications created before the fix).
+ */
+async function enrichReservationNotificationVariables(notificationObjs) {
+  const needsOwner = notificationObjs.filter(
+    (n) =>
+      ['reservation_expired', 'reservation_cancelled'].includes(n.type) &&
+      n.relatedWishlistId &&
+      !(n.messageVariables && n.messageVariables.ownerName)
+  );
+  if (needsOwner.length === 0) return notificationObjs;
+
+  const wishlistIds = [
+    ...new Set(
+      needsOwner
+        .map((n) => (n.relatedWishlistId && (n.relatedWishlistId._id || n.relatedWishlistId).toString()))
+        .filter(Boolean)
+    )
+  ];
+  const wishlists =
+    wishlistIds.length > 0
+      ? await Wishlist.find({ _id: { $in: wishlistIds } })
+          .select('_id owner')
+          .populate({ path: 'owner', select: 'fullName _id', model: 'User' })
+          .lean()
+      : [];
+
+  const ownerByWishlist = new Map();
+  for (const w of wishlists) {
+    const o = w.owner;
+    const oid = o && (o._id || o);
+    ownerByWishlist.set(w._id.toString(), {
+      fullName: (o && o.fullName) || 'Owner',
+      _id: oid
+    });
+  }
+
+  return notificationObjs.map((obj) => {
+    if (
+      ['reservation_expired', 'reservation_cancelled'].includes(obj.type) &&
+      obj.relatedWishlistId &&
+      !(obj.messageVariables && obj.messageVariables.ownerName)
+    ) {
+      const wid = (obj.relatedWishlistId._id || obj.relatedWishlistId).toString();
+      const ownerData = ownerByWishlist.get(wid);
+      if (ownerData) {
+        obj.messageVariables = { ...(obj.messageVariables || {}), ownerName: ownerData.fullName };
+        if (!obj.relatedUser && ownerData._id) {
+          obj.relatedUser = { _id: ownerData._id, fullName: ownerData.fullName };
+        }
+      }
+    }
+    return obj;
+  });
+}
+
+/**
  * Resolve notification message for a given language (on-the-fly translation).
  * Uses messageKey + messageVariables if present; otherwise falls back to stored message.
  */
@@ -239,5 +297,6 @@ module.exports = {
   getUnreadCountWithBadge,
   isUserOnline,
   resolveNotificationMessage,
-  getLanguageFromHeaders
+  getLanguageFromHeaders,
+  enrichReservationNotificationVariables
 };
