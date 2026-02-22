@@ -1,6 +1,7 @@
 const cron = require('node-cron');
 const Item = require('../models/Item');
 const Reservation = require('../models/Reservation');
+const Wishlist = require('../models/Wishlist');
 const { createNotification } = require('../utils/notificationHelper');
 
 const FORTY_EIGHT_HOURS_MS = 48 * 60 * 60 * 1000;
@@ -14,18 +15,41 @@ async function cancelExpiredReservations(io) {
     reservedUntil: { $ne: null, $lt: now }
   })
     .select('_id name wishlist')
-    .populate({ path: 'wishlist', select: 'owner', populate: { path: 'owner', select: 'fullName' } })
     .lean();
 
+  const wishlistIds = [...new Set(
+    expiredItems
+      .map(i => i.wishlist && (i.wishlist._id || i.wishlist).toString())
+      .filter(Boolean)
+  )];
+
+  const wishlistsWithOwner = wishlistIds.length > 0
+    ? await Wishlist.find({ _id: { $in: wishlistIds } })
+        .select('_id owner')
+        .populate({ path: 'owner', select: 'fullName', model: 'User' })
+        .lean()
+    : [];
+
+  const ownerByWishlist = new Map();
+  for (const w of wishlistsWithOwner) {
+    const owner = w.owner;
+    ownerByWishlist.set(w._id.toString(), {
+      id: owner && (owner._id || owner),
+      fullName: (owner && owner.fullName) || 'Owner'
+    });
+  }
+
   for (const item of expiredItems) {
+    const wishlistIdRaw = item.wishlist && (item.wishlist._id || item.wishlist);
+    const wishlistId = wishlistIdRaw ? wishlistIdRaw.toString() : null;
+    const ownerData = wishlistId ? ownerByWishlist.get(wishlistId) : null;
+    const ownerId = ownerData ? ownerData.id : null;
+    const ownerName = (ownerData && ownerData.fullName) || 'Owner';
+
     const reservations = await Reservation.find({
       item: item._id,
       status: 'reserved'
     }).select('reserver').lean();
-
-    const wishlistId = item.wishlist && (item.wishlist._id ? item.wishlist._id.toString() : item.wishlist.toString());
-    const ownerId = item.wishlist && item.wishlist.owner && (item.wishlist.owner._id || item.wishlist.owner);
-    const ownerName = (item.wishlist && item.wishlist.owner && item.wishlist.owner.fullName) || 'Owner';
 
     for (const res of reservations) {
       await Reservation.findByIdAndUpdate(res._id, { status: 'cancelled' });
