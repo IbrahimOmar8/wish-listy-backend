@@ -795,16 +795,46 @@ exports.removeFriend = async (req, res) => {
     const itemIdsA = itemsA.map(i => i._id);
     const itemIdsB = itemsB.map(i => i._id);
 
-    // Get item IDs that have reservations we're about to cancel (only those need Item cleanup)
-    const affectedIds = [];
+    // Fetch full reservation data for notifications (item + wishlist owner)
+    const notificationsToSend = [];
     if (itemIdsA.length > 0) {
-      const rB = await Reservation.find({ item: { $in: itemIdsA }, reserver: friendId, status: 'reserved' }).select('item').session(session);
-      affectedIds.push(...rB.map(r => r.item));
+      const rB = await Reservation.find({ item: { $in: itemIdsA }, reserver: friendId, status: 'reserved' })
+        .populate({ path: 'item', populate: { path: 'wishlist', populate: { path: 'owner', select: 'fullName' } } })
+        .session(session);
+      for (const r of rB) {
+        if (r.item && r.item.wishlist && r.item.wishlist.owner) {
+          const owner = r.item.wishlist.owner;
+          notificationsToSend.push({
+            recipientId: r.reserver,
+            senderId: owner._id,
+            itemId: r.item._id,
+            wishlistId: r.item.wishlist._id,
+            itemName: r.item.name || 'Item',
+            ownerName: owner.fullName || 'Owner'
+          });
+        }
+      }
     }
     if (itemIdsB.length > 0) {
-      const rA = await Reservation.find({ item: { $in: itemIdsB }, reserver: currentUserId, status: 'reserved' }).select('item').session(session);
-      affectedIds.push(...rA.map(r => r.item));
+      const rA = await Reservation.find({ item: { $in: itemIdsB }, reserver: currentUserId, status: 'reserved' })
+        .populate({ path: 'item', populate: { path: 'wishlist', populate: { path: 'owner', select: 'fullName' } } })
+        .session(session);
+      for (const r of rA) {
+        if (r.item && r.item.wishlist && r.item.wishlist.owner) {
+          const owner = r.item.wishlist.owner;
+          notificationsToSend.push({
+            recipientId: r.reserver,
+            senderId: owner._id,
+            itemId: r.item._id,
+            wishlistId: r.item.wishlist._id,
+            itemName: r.item.name || 'Item',
+            ownerName: owner.fullName || 'Owner'
+          });
+        }
+      }
     }
+
+    const affectedIds = notificationsToSend.map(n => n.itemId);
 
     // B reserved items on A's wishlists → cancel B's reservations
     if (itemIdsA.length > 0) {
@@ -852,6 +882,27 @@ exports.removeFriend = async (req, res) => {
 
     await session.commitTransaction();
     await session.endSession();
+
+    // Send reservation_cancelled notifications to reservers (after transaction commits)
+    const io = req.app.get('io');
+    for (const n of notificationsToSend) {
+      try {
+        await createNotification({
+          recipientId: n.recipientId,
+          senderId: n.senderId,
+          type: 'reservation_cancelled',
+          title: 'Reservation Cancelled',
+          messageKey: 'notif.reservation_cancelled',
+          messageVariables: { itemName: n.itemName, ownerName: n.ownerName },
+          relatedId: n.itemId,
+          relatedWishlistId: n.wishlistId,
+          emitSocketEvent: true,
+          socketIo: io
+        });
+      } catch (err) {
+        console.error('Remove friend: failed to send reservation_cancelled notification to', n.recipientId, err);
+      }
+    }
 
     res.status(200).json({
       success: true,

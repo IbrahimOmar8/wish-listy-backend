@@ -12,7 +12,10 @@ async function cancelExpiredReservations(io) {
   const now = new Date();
   const expiredItems = await Item.find({
     reservedUntil: { $ne: null, $lt: now }
-  }).select('_id name wishlist').lean();
+  })
+    .select('_id name wishlist')
+    .populate({ path: 'wishlist', select: 'owner', populate: { path: 'owner', select: 'fullName' } })
+    .lean();
 
   for (const item of expiredItems) {
     const reservations = await Reservation.find({
@@ -20,17 +23,20 @@ async function cancelExpiredReservations(io) {
       status: 'reserved'
     }).select('reserver').lean();
 
+    const wishlistId = item.wishlist && (item.wishlist._id ? item.wishlist._id.toString() : item.wishlist.toString());
+    const ownerId = item.wishlist && item.wishlist.owner && (item.wishlist.owner._id || item.wishlist.owner);
+    const ownerName = (item.wishlist && item.wishlist.owner && item.wishlist.owner.fullName) || 'Owner';
+
     for (const res of reservations) {
       await Reservation.findByIdAndUpdate(res._id, { status: 'cancelled' });
-      const wishlistId = item.wishlist && item.wishlist.toString ? item.wishlist.toString() : item.wishlist;
       try {
         await createNotification({
           recipientId: res.reserver,
-          senderId: null,
+          senderId: ownerId,
           type: 'reservation_expired',
           title: 'Reservation Expired',
           messageKey: 'notif.reservation_expired',
-          messageVariables: { itemName: item.name || 'Item' },
+          messageVariables: { itemName: item.name || 'Item', ownerName },
           relatedId: item._id,
           relatedWishlistId: wishlistId,
           emitSocketEvent: true,

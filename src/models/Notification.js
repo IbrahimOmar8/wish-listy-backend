@@ -21,6 +21,7 @@ const notificationSchema = new mongoose.Schema({
       'item_received',
       'item_not_received',
       'reservation_expired',
+      'reservation_cancelled',
       'reservation_reminder',
       'event_reminder',
       'event_invite',
