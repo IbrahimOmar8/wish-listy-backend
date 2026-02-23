@@ -19,11 +19,24 @@ const eventSchema = new mongoose.Schema({
     required: [true, 'Event date is required'],
     validate: {
       validator: function(value) {
-        // Date must be in the future (only for new events)
-        if (this.isNew) {
-          return value > new Date();
+        if (!this.isNew) return true;
+        const now = new Date();
+        if (!this.time || typeof this.time !== 'string') {
+          return value > now;
         }
-        return true;
+        const match = this.time.trim().match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
+        if (!match) return value > now;
+        const [, h, m] = match;
+        const eventDateTime = new Date(Date.UTC(
+          value.getUTCFullYear(),
+          value.getUTCMonth(),
+          value.getUTCDate(),
+          parseInt(h, 10),
+          parseInt(m, 10),
+          0,
+          0
+        ));
+        return eventDateTime > now;
       },
       message: 'Event date must be in the future'
     }

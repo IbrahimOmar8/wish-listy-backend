@@ -223,8 +223,6 @@ exports.createEvent = async (req, res) => {
       const eventDate = new Date(date);
       if (isNaN(eventDate.getTime())) {
         errors.date = req.t('validation.val_event_date_invalid');
-      } else if (eventDate <= new Date()) {
-        errors.date = req.t('validation.val_event_date_future');
       }
     }
 
@@ -234,6 +232,24 @@ exports.createEvent = async (req, res) => {
       const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/; // HH:MM 24-hour format
       if (!timeRegex.test(time)) {
         errors.time = req.t('validation.val_event_time_invalid');
+      }
+    }
+
+    // Validate date+time together: event must be in the future (after date and time check)
+    if (!errors.date && !errors.time && date && time) {
+      const eventDate = new Date(date);
+      const [hours, minutes] = time.trim().split(':').map(Number);
+      const eventDateTime = new Date(Date.UTC(
+        eventDate.getUTCFullYear(),
+        eventDate.getUTCMonth(),
+        eventDate.getUTCDate(),
+        hours,
+        minutes,
+        0,
+        0
+      ));
+      if (eventDateTime <= new Date()) {
+        errors.date = req.t('validation.val_event_date_future');
       }
     }
 
