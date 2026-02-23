@@ -418,7 +418,8 @@ exports.updateUserProfile = async (req, res) => {
       fullName,
       name, // alias from frontend
       email, 
-      phone 
+      phone,
+      shippingAddress: shippingAddressBody
     } = req.body;
 
     // Normalize field names (support both camelCase and snake_case)
@@ -535,12 +536,29 @@ exports.updateUserProfile = async (req, res) => {
       }
     }
 
+    // Validate and update shippingAddress (supports nested object from frontend)
+    if (shippingAddressBody !== undefined && shippingAddressBody !== null && typeof shippingAddressBody === 'object') {
+      const addr = shippingAddressBody;
+      if (addr.receiverName !== undefined) {
+        updateData['shippingAddress.receiverName'] = addr.receiverName ? String(addr.receiverName).trim() : null;
+      }
+      if (addr.phoneNumber !== undefined) {
+        updateData['shippingAddress.phoneNumber'] = addr.phoneNumber ? String(addr.phoneNumber).trim() : null;
+      }
+      if (addr.fullAddress !== undefined) {
+        updateData['shippingAddress.fullAddress'] = addr.fullAddress ? String(addr.fullAddress).trim() : null;
+      }
+      if (addr.isVisibleToFriends !== undefined) {
+        updateData['shippingAddress.isVisibleToFriends'] = Boolean(addr.isVisibleToFriends);
+      }
+    }
+
     // Update user
     const updatedUser = await User.findByIdAndUpdate(
       id,
-      updateData,
+      { $set: updateData },
       { new: true, runValidators: true }
-    ).select('_id fullName username handle email phone profileImage bio gender birth_date country_code interests preferredLanguage createdAt updatedAt');
+    ).select('_id fullName username handle email phone profileImage bio gender birth_date country_code interests preferredLanguage shippingAddress createdAt updatedAt');
 
     if (!updatedUser) {
       return res.status(404).json({
