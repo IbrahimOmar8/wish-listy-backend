@@ -216,7 +216,7 @@ exports.getUserProfile = async (req, res) => {
     const currentUserId = req.user.id; // Authenticated user ID
 
     const user = await User.findById(id)
-      .select('_id fullName username handle email phone profileImage bio gender birth_date country_code friends interests preferredLanguage createdAt');
+      .select('_id fullName username handle email phone profileImage bio gender birth_date country_code friends interests preferredLanguage shippingAddress createdAt');
 
     if (!user) {
       return res.status(404).json({
@@ -340,6 +340,24 @@ exports.getUserProfile = async (req, res) => {
       formattedBirthDate = `${year}-${month}-${day}`;
     }
 
+    // Shipping address: own profile = full object; friend = only if isVisibleToFriends (exclude isVisibleToFriends); else null
+    let shippingAddress = null;
+    const address = user.shippingAddress || {};
+    if (isOwnProfile) {
+      shippingAddress = {
+        receiverName: address.receiverName || null,
+        phoneNumber: address.phoneNumber || null,
+        fullAddress: address.fullAddress || null,
+        isVisibleToFriends: Boolean(address.isVisibleToFriends)
+      };
+    } else if (relationship.isFriend && address.isVisibleToFriends) {
+      shippingAddress = {
+        receiverName: address.receiverName || null,
+        phoneNumber: address.phoneNumber || null,
+        fullAddress: address.fullAddress || null
+      };
+    }
+
     // Return profile with friends, wishlist, and events counts, plus relationship info
     res.status(200).json({
       success: true,
@@ -359,6 +377,7 @@ exports.getUserProfile = async (req, res) => {
         friendsCount: user.friends.length,
         wishlistCount,
         eventsCount,
+        shippingAddress,
         createdAt: user.createdAt,
         relationship,
         mutualFriendsData
@@ -570,6 +589,156 @@ exports.updateUserProfile = async (req, res) => {
     res.status(500).json({
       success: false,
       message: req.t('common.server_error'),
+      error: error.message
+    });
+  }
+};
+
+/**
+ * PUT /api/users/shipping-address
+ * Update the authenticated user's shipping address.
+ */
+exports.updateShippingAddress = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { receiverName, phoneNumber, fullAddress, isVisibleToFriends } = req.body;
+
+    const updateData = {};
+
+    if (receiverName !== undefined) {
+      updateData['shippingAddress.receiverName'] = receiverName ? receiverName.trim() : null;
+    }
+    if (phoneNumber !== undefined) {
+      updateData['shippingAddress.phoneNumber'] = phoneNumber ? phoneNumber.trim() : null;
+    }
+    if (fullAddress !== undefined) {
+      updateData['shippingAddress.fullAddress'] = fullAddress ? fullAddress.trim() : null;
+    }
+    if (isVisibleToFriends !== undefined) {
+      updateData['shippingAddress.isVisibleToFriends'] = Boolean(isVisibleToFriends);
+    }
+
+    const user = await User.findByIdAndUpdate(
+      userId,
+      { $set: updateData },
+      { new: true, runValidators: true }
+    ).select('shippingAddress');
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Shipping address updated successfully',
+      data: {
+        shippingAddress: user.shippingAddress || {
+          receiverName: null,
+          phoneNumber: null,
+          fullAddress: null,
+          isVisibleToFriends: false
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Update shipping address error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error updating shipping address',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * GET /api/users/shipping-address/:targetUserId
+ * Get a friend's shipping address if they allow it.
+ *
+ * Logic:
+ * 1. Check friendship: requester MUST be in target user's friends list.
+ * 2. Check visibility: target user's isVisibleToFriends MUST be true.
+ * 3. Data security: if conditions not met OR no address exists → 404/403 so frontend
+ *    knows not to show the location icon.
+ *
+ * Status codes:
+ * - 404: User not found, or no address exists / address is empty
+ * - 403: Not friends, or isVisibleToFriends is false
+ */
+exports.getShippingAddress = async (req, res) => {
+  try {
+    const currentUserId = req.user.id;
+    const { targetUserId } = req.params;
+
+    const targetUser = await User.findById(targetUserId)
+      .select('friends shippingAddress');
+
+    if (!targetUser) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Special case: user can always see their own address (they aren't "friends" with themselves)
+    const isOwnProfile = currentUserId.toString() === targetUserId.toString();
+
+    // 1. Verify friendship (or own profile): requester must be in target's friends list, or viewing self
+    const isFriend = isOwnProfile || (targetUser.friends || []).some(
+      fid => fid.toString() === currentUserId.toString()
+    );
+
+    if (!isFriend) {
+      return res.status(403).json({
+        success: false,
+        message: 'Address is private'
+      });
+    }
+
+    const address = targetUser.shippingAddress || {};
+
+    // 2. Verify visibility: isVisibleToFriends must be true (owners always pass)
+    if (!isOwnProfile && !address.isVisibleToFriends) {
+      return res.status(403).json({
+        success: false,
+        message: 'Address is private'
+      });
+    }
+
+    // 3. Data security: for non-owners, no address or empty fullAddress → 404; owners always get their data
+    const hasAddress = address.fullAddress && String(address.fullAddress).trim().length > 0;
+    if (!isOwnProfile && !hasAddress) {
+      return res.status(404).json({
+        success: false,
+        message: 'Address not found'
+      });
+    }
+
+    // Own profile: return full object with isVisibleToFriends; friends: exclude isVisibleToFriends
+    const responseData = isOwnProfile
+      ? {
+          receiverName: address.receiverName || null,
+          phoneNumber: address.phoneNumber || null,
+          fullAddress: address.fullAddress ? address.fullAddress.trim() : null,
+          isVisibleToFriends: Boolean(address.isVisibleToFriends)
+        }
+      : {
+          receiverName: address.receiverName || null,
+          phoneNumber: address.phoneNumber || null,
+          fullAddress: address.fullAddress ? address.fullAddress.trim() : null
+        };
+
+    res.status(200).json({
+      success: true,
+      data: responseData
+    });
+  } catch (error) {
+    console.error('Get shipping address error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching shipping address',
       error: error.message
     });
   }

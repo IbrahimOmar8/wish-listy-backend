@@ -1,7 +1,14 @@
 const express = require('express');
 const router = express.Router();
 const { protect } = require('../middleware/auth');
-const { searchUsers, getUserProfile, updateUserProfile, updateUserInterests } = require('../controllers/userController');
+const {
+  searchUsers,
+  getUserProfile,
+  updateUserProfile,
+  updateUserInterests,
+  updateShippingAddress,
+  getShippingAddress
+} = require('../controllers/userController');
 const {
   getBlockedUsers,
   blockUser,
@@ -19,6 +26,10 @@ router.get('/search', protect, searchUsers);
 
 // Update user interests - requires authentication (must be before parameterized routes)
 router.put('/interests', protect, updateUserInterests);
+
+// Shipping address (must be before /:id routes)
+router.put('/shipping-address', protect, updateShippingAddress);
+router.get('/shipping-address/:targetUserId', protect, getShippingAddress);
 
 // Block and report (must be before /:id routes)
 router.get('/blocked', protect, getBlockedUsers);

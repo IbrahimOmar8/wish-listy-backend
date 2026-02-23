@@ -157,6 +157,12 @@ const userSchema = new mongoose.Schema({
     default: null,
     trim: true
   },
+  shippingAddress: {
+    receiverName: { type: String, default: null },
+    phoneNumber: { type: String, default: null },
+    fullAddress: { type: String, default: null },
+    isVisibleToFriends: { type: Boolean, default: false }
+  },
   createdAt: {
     type: Date,
     default: Date.now
