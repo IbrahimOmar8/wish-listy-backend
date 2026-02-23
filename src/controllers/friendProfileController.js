@@ -274,10 +274,10 @@ exports.getFriendEvents = async (req, res) => {
             };
           });
 
-          // Compute status dynamically
-          const eventDate = new Date(event.date);
+          // Compute status dynamically: combine date + time before comparing to now
+          const eventDateTime = Event.getEventDateTime(event.date, event.time);
           const now = new Date();
-          const computedStatus = eventDate < now ? 'past' : 'upcoming';
+          const computedStatus = eventDateTime < now ? 'past' : 'upcoming';
 
           return {
             ...eventObj,
@@ -369,10 +369,10 @@ exports.getFriendEvents = async (req, res) => {
           };
         });
 
-        // Compute status dynamically based on event date vs current time
-        const eventDate = new Date(event.date);
+        // Compute status dynamically: combine date + time before comparing to now
+        const eventDateTime = Event.getEventDateTime(event.date, event.time);
         const now = new Date();
-        const computedStatus = eventDate < now ? 'past' : 'upcoming';
+        const computedStatus = eventDateTime < now ? 'past' : 'upcoming';
 
         return {
           ...eventObj,

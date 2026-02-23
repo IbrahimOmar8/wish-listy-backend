@@ -545,12 +545,12 @@ exports.getMyEvents = async (req, res) => {
           });
         }
         
-        // Compute status dynamically based on event date vs current time
-        const eventDate = new Date(eventObj.date);
+        // Compute status dynamically: combine date + time before comparing to now
+        const eventDateTime = Event.getEventDateTime(eventObj.date, eventObj.time);
         const now = new Date();
-        const computedStatus = eventDate < now ? 'past' : 'upcoming';
+        const computedStatus = eventDateTime < now ? 'past' : 'upcoming';
         eventObj.status = computedStatus; // Override static status with computed dynamic status
-        
+
         return eventObj;
       })
     );
@@ -585,13 +585,13 @@ exports.getMyEvents = async (req, res) => {
         } else {
           eventObj.invited_friends = [];
         }
-        
-        // Compute status dynamically based on event date vs current time
-        const eventDate = new Date(eventObj.date);
+
+        // Compute status dynamically: combine date + time before comparing to now
+        const eventDateTime = Event.getEventDateTime(eventObj.date, eventObj.time);
         const now = new Date();
-        const computedStatus = eventDate < now ? 'past' : 'upcoming';
+        const computedStatus = eventDateTime < now ? 'past' : 'upcoming';
         eventObj.status = computedStatus; // Override static status with computed dynamic status
-        
+
         return eventObj;
       })
     );
@@ -702,10 +702,10 @@ exports.getEventById = async (req, res) => {
       .sort({ updatedAt: -1 }) // Most recent responses first
       .limit(10); // Top 10 for social proof
 
-    // Compute status dynamically based on event date vs current time
-    const eventDate = new Date(event.date);
+    // Compute status dynamically: combine date + time before comparing to now
+    const eventDateTime = Event.getEventDateTime(event.date, event.time);
     const now = new Date();
-    const computedStatus = eventDate < now ? 'past' : 'upcoming';
+    const computedStatus = eventDateTime < now ? 'past' : 'upcoming';
 
     res.status(200).json({
       success: true,

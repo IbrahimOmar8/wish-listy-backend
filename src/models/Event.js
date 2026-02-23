@@ -157,17 +157,41 @@ eventSchema.pre('save', function(next) {
   next();
 });
 
-// Virtual for checking if event is past
+/**
+ * Build combined datetime from event date + time (UTC).
+ * @param {Date} date - Event date
+ * @param {string} [time] - Event time HH:mm
+ * @returns {Date} Combined datetime
+ */
+eventSchema.statics.getEventDateTime = function(date, time) {
+  const d = new Date(date);
+  if (!time || typeof time !== 'string') return d;
+  const match = time.trim().match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
+  if (!match) return d;
+  const [, h, m] = match;
+  return new Date(Date.UTC(
+    d.getUTCFullYear(),
+    d.getUTCMonth(),
+    d.getUTCDate(),
+    parseInt(h, 10),
+    parseInt(m, 10),
+    0,
+    0
+  ));
+};
+
+// Virtual for checking if event is past (uses date + time)
 eventSchema.virtual('isPast').get(function() {
-  return this.date < new Date();
+  const eventDateTime = this.constructor.getEventDateTime(this.date, this.time);
+  return eventDateTime < new Date();
 });
 
-// Update status based on date
+// Update status based on date + time
 eventSchema.methods.updateStatus = function() {
   const now = new Date();
   if (this.status === 'cancelled') return;
-  
-  if (this.date < now) {
+  const eventDateTime = this.constructor.getEventDateTime(this.date, this.time);
+  if (eventDateTime < now) {
     this.status = 'completed';
   } else {
     this.status = 'upcoming';
