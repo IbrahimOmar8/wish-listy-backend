@@ -5,6 +5,7 @@ const {
   reserveItem,
   cancelReservation,
   getMyReservations,
+  getPendingReservations,
 } = require('../controllers/reservationController');
 
 // All routes require authentication
@@ -15,5 +16,8 @@ router.put('/items/:itemId/reserve', reserveItem);
 
 // Get my reservations
 router.get('/reservations', getMyReservations);
+
+// Get my pending reservations (not purchased, not received)
+router.get('/reservations/pending', getPendingReservations);
 
 module.exports = router;

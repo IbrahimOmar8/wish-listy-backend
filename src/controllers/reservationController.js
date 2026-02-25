@@ -389,3 +389,64 @@ exports.getMyReservations = async (req, res) => {
     });
   }
 };
+
+/**
+ * Get my pending reservations (for Home screen)
+ * GET /api/reservations/pending
+ *
+ * Pending reservations are:
+ * - Reserved by the current user
+ * - Item is not purchased (isPurchased: false)
+ * - Item is not received (isReceived: false)
+ * Sorted by item.reservedUntil ascending (soonest expiring first).
+ */
+exports.getPendingReservations = async (req, res) => {
+  try {
+    const reserverId = req.user.id;
+
+    const reservations = await Reservation.find({
+      reserver: reserverId,
+      status: 'reserved',
+    })
+      .populate({
+        path: 'item',
+        match: { isPurchased: false, isReceived: false },
+        select:
+          'name description image url storeName storeLocation notes priority quantity isPurchased purchasedBy purchasedAt isReceived wishlist reservedUntil reservationReminderSent extensionCount createdAt updatedAt',
+        populate: {
+          path: 'wishlist',
+          select: 'name owner',
+          populate: {
+            path: 'owner',
+            select: '_id fullName username profileImage',
+          },
+        },
+      })
+      .lean();
+
+    // Filter out reservations where item didn't match the pending criteria (null after match)
+    const pendingReservations = reservations
+      .filter((res) => res.item)
+      .sort((a, b) => {
+        const aTime = a.item.reservedUntil
+          ? new Date(a.item.reservedUntil).getTime()
+          : Infinity;
+        const bTime = b.item.reservedUntil
+          ? new Date(b.item.reservedUntil).getTime()
+          : Infinity;
+        return aTime - bTime;
+      });
+
+    return res.status(200).json({
+      success: true,
+      data: pendingReservations,
+    });
+  } catch (error) {
+    console.error('Get pending reservations error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to get pending reservations',
+      error: error.message,
+    });
+  }
+};
