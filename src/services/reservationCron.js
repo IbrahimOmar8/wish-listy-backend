@@ -40,16 +40,35 @@ async function cancelExpiredReservations(io) {
   }
 
   for (const item of expiredItems) {
-    const wishlistIdRaw = item.wishlist && (item.wishlist._id || item.wishlist);
+    // Always fetch the latest item state to avoid acting on stale data
+    const latestItem = await Item.findById(item._id)
+      .select('name wishlist isPurchased isReceived reservedUntil reservationReminderSent extensionCount')
+      .lean();
+
+    if (!latestItem) {
+      continue;
+    }
+
+    // If item has already been purchased or received, silently skip
+    if (latestItem.isPurchased || latestItem.isReceived) {
+      continue;
+    }
+
+    const wishlistIdRaw = latestItem.wishlist && (latestItem.wishlist._id || latestItem.wishlist);
     const wishlistId = wishlistIdRaw ? wishlistIdRaw.toString() : null;
     const ownerData = wishlistId ? ownerByWishlist.get(wishlistId) : null;
     const ownerId = ownerData ? ownerData.id : null;
     const ownerName = (ownerData && ownerData.fullName) || 'Owner';
 
+    // Only act if there are still active reservations for this item
     const reservations = await Reservation.find({
-      item: item._id,
+      item: latestItem._id,
       status: 'reserved'
     }).select('reserver').lean();
+
+    if (!reservations || reservations.length === 0) {
+      continue;
+    }
 
     for (const res of reservations) {
       await Reservation.findByIdAndUpdate(res._id, { status: 'cancelled' });
@@ -60,8 +79,8 @@ async function cancelExpiredReservations(io) {
           type: 'reservation_expired',
           title: 'Reservation Expired',
           messageKey: 'notif.reservation_expired',
-          messageVariables: { itemName: item.name || 'Item', ownerName },
-          relatedId: item._id,
+          messageVariables: { itemName: latestItem.name || 'Item', ownerName },
+          relatedId: latestItem._id,
           relatedWishlistId: wishlistId,
           emitSocketEvent: true,
           socketIo: io
@@ -71,7 +90,7 @@ async function cancelExpiredReservations(io) {
       }
     }
 
-    await Item.findByIdAndUpdate(item._id, {
+    await Item.findByIdAndUpdate(latestItem._id, {
       reservedUntil: null,
       reservationReminderSent: false,
       extensionCount: 0
@@ -92,22 +111,42 @@ async function send48HourReminders(io) {
   }).select('_id name wishlist').lean();
 
   for (const item of itemsDueSoon) {
+    // Always fetch the latest item state to avoid acting on stale data
+    const latestItem = await Item.findById(item._id)
+      .select('name wishlist isPurchased isReceived reservedUntil reservationReminderSent')
+      .lean();
+
+    if (!latestItem) {
+      continue;
+    }
+
+    // If item has already been purchased or received, silently skip reminder
+    if (latestItem.isPurchased || latestItem.isReceived) {
+      continue;
+    }
+
     const reservations = await Reservation.find({
-      item: item._id,
+      item: latestItem._id,
       status: 'reserved'
     }).select('reserver').lean();
 
+    if (!reservations || reservations.length === 0) {
+      continue;
+    }
+
     for (const res of reservations) {
       try {
-        const wishlistId = item.wishlist && item.wishlist.toString ? item.wishlist.toString() : item.wishlist;
+        const wishlistId = latestItem.wishlist && latestItem.wishlist.toString
+          ? latestItem.wishlist.toString()
+          : latestItem.wishlist;
         await createNotification({
           recipientId: res.reserver,
           senderId: null,
           type: 'reservation_reminder',
           title: 'Reservation Reminder',
           messageKey: 'notif.reservation_reminder',
-          messageVariables: { itemName: item.name || 'Item' },
-          relatedId: item._id,
+          messageVariables: { itemName: latestItem.name || 'Item' },
+          relatedId: latestItem._id,
           relatedWishlistId: wishlistId,
           emitSocketEvent: true,
           socketIo: io
@@ -117,7 +156,7 @@ async function send48HourReminders(io) {
       }
     }
 
-    await Item.findByIdAndUpdate(item._id, { reservationReminderSent: true });
+    await Item.findByIdAndUpdate(latestItem._id, { reservationReminderSent: true });
   }
 }
 
