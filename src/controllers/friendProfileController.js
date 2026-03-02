@@ -142,11 +142,19 @@ exports.getFriendWishlists = async (req, res) => {
       .select('name description privacy category createdAt items')
       .sort({ createdAt: -1 });
 
-    // Get item counts and preview items (top 3) for each wishlist
+    // Get item counts, purchasedCount, and preview items (top 3) for each wishlist
     const wishlistsWithCounts = await Promise.all(
       wishlists.map(async (wishlist) => {
         const itemCount = wishlist.items ? wishlist.items.length : 0;
-        
+
+        // Count items that are purchased or received
+        const purchasedCount = wishlist.items && wishlist.items.length > 0
+          ? await Item.countDocuments({
+              _id: { $in: wishlist.items },
+              $or: [{ isPurchased: true }, { isReceived: true }]
+            })
+          : 0;
+
         // Get top 3 items (by priority: high -> medium -> low, then by creation date)
         // Only show unpurchased items in preview
         const topItems = wishlist.items && wishlist.items.length > 0
@@ -179,6 +187,7 @@ exports.getFriendWishlists = async (req, res) => {
         return {
           ...wishlist.toObject(),
           itemCount,
+          purchasedCount,
           previewItems: topItems.map(item => ({
             _id: item._id,
             name: item.name,
