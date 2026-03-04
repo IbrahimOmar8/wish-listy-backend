@@ -287,7 +287,9 @@ exports.respondToFriendRequest = async (req, res) => {
 exports.getMyFriends = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { limit = 100, page = 1 } = req.query;
+    const { limit = 100, page = 1, search } = req.query;
+    const trimmedSearch =
+      typeof search === 'string' ? search.trim() : '';
 
     // Get current user to access friends array; exclude blocked users from friends list
     const currentUser = await User.findById(userId).select('friends blockedUsers');
@@ -304,17 +306,46 @@ exports.getMyFriends = async (req, res) => {
       fid => !blockedIds.includes(fid.toString())
     );
 
-    const totalFriends = allowedFriendIds.length;
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    if (allowedFriendIds.length === 0) {
+      return res.status(200).json({
+        success: true,
+        count: 0,
+        total: 0,
+        page: parseInt(page, 10),
+        limit: parseInt(limit, 10),
+        data: []
+      });
+    }
+
+    const numericLimit = parseInt(limit, 10);
+    const numericPage = parseInt(page, 10);
+
+    const baseFilter = {
+      _id: { $in: allowedFriendIds }
+    };
+
+    let mongoFilter = baseFilter;
+
+    if (trimmedSearch && trimmedSearch.length > 0) {
+      const regex = new RegExp(trimmedSearch, 'i');
+      mongoFilter = {
+        ...baseFilter,
+        $or: [
+          { fullName: regex },
+          { handle: regex }
+        ]
+      };
+    }
+
+    const totalFriends = await User.countDocuments(mongoFilter);
+    const skip = (numericPage - 1) * numericLimit;
 
     // Get friends with pagination and sorting
-    const friends = await User.find({
-      _id: { $in: allowedFriendIds }
-    })
+    const friends = await User.find(mongoFilter)
       .select('_id fullName username handle profileImage')
       .sort({ fullName: 1 }) // Sort alphabetically by name
       .skip(skip)
-      .limit(parseInt(limit));
+      .limit(numericLimit);
 
     // Get wishlist counts for all friends in parallel
     const friendIds = friends.map(friend => friend._id);
@@ -353,8 +384,8 @@ exports.getMyFriends = async (req, res) => {
       success: true,
       count: enrichedFriends.length,
       total: totalFriends,
-      page: parseInt(page),
-      limit: parseInt(limit),
+      page: numericPage,
+      limit: numericLimit,
       data: enrichedFriends
     });
   } catch (error) {
