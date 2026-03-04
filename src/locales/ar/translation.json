@@ -108,7 +108,9 @@
     "item_not_received": "ذكر صاحب القائمة أنه لم يستلم الهدية بعد. يرجى التحقق من الحالة.",
     "reservation_expired": "انتهت صلاحية حجزك لـ {{itemName}} في قائمة {{ownerName}} وهي متاحة مرة أخرى.",
     "reservation_cancelled": "تم إلغاء حجزك لـ {{itemName}} في قائمة {{ownerName}}.",
-    "reservation_reminder": "تذكير: حجزك لـ \"{{itemName}}\" ينتهي خلال 48 ساعة. حدده كمُشترى أو مدّد الحجز!",
+    "reservation_reminder_hours": "تذكير: حجزك لـ \"{{itemName}}\" ينتهي خلال {{hours}} ساعة. حدده كمُشترى أو مدّد الحجز!",
+    "reservation_reminder_days": "تذكير: حجزك لـ \"{{itemName}}\" ينتهي خلال {{days}} يوم. حدده كمُشترى أو مدّد الحجز!",
+    "reservation_reminder_days_hours": "تذكير: حجزك لـ \"{{itemName}}\" ينتهي خلال {{days}} يوم و {{hours}} ساعة. حدده كمُشترى أو مدّد الحجز!",
     "event_reminder": "تذكير: {{eventName}} بعد يومين!"
   },
   "interests": {

@@ -108,7 +108,9 @@
     "item_not_received": "The owner mentioned they haven't received the gift yet. Please check the status.",
     "reservation_expired": "Your reservation for {{itemName}} on {{ownerName}}'s wishlist has expired and is available again.",
     "reservation_cancelled": "Your reservation for {{itemName}} on {{ownerName}}'s wishlist has been cancelled.",
-    "reservation_reminder": "Reminder: Your reservation for \"{{itemName}}\" expires in 48 hours. Mark as purchased or extend it!",
+    "reservation_reminder_hours": "Reminder: Your reservation for \"{{itemName}}\" expires in {{hours}} hours. Mark as purchased or extend it!",
+    "reservation_reminder_days": "Reminder: Your reservation for \"{{itemName}}\" expires in {{days}} days. Mark as purchased or extend it!",
+    "reservation_reminder_days_hours": "Reminder: Your reservation for \"{{itemName}}\" expires in {{days}} days and {{hours}} hours. Mark as purchased or extend it!",
     "event_reminder": "Reminder: {{eventName}} is in 2 days!"
   },
   "interests": {

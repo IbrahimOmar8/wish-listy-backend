@@ -125,6 +125,37 @@ async function send48HourReminders(io) {
       continue;
     }
 
+    if (!latestItem.reservedUntil) {
+      continue;
+    }
+
+    const expiresAt = new Date(latestItem.reservedUntil);
+    const diffMs = expiresAt.getTime() - now.getTime();
+    const hoursLeft = Math.ceil(diffMs / (1000 * 60 * 60));
+
+    if (Number.isNaN(hoursLeft) || hoursLeft <= 0) {
+      continue;
+    }
+
+    // Skip reminder if less than 24 hours remain
+    if (hoursLeft < 24) {
+      continue;
+    }
+
+    const days = Math.floor(hoursLeft / 24);
+    const remainingHours = hoursLeft % 24;
+
+    let messageKey = 'notif.reservation_reminder_hours';
+    let messageVariables = { itemName: latestItem.name || 'Item', hours: hoursLeft };
+
+    if (days > 0 && remainingHours === 0) {
+      messageKey = 'notif.reservation_reminder_days';
+      messageVariables = { itemName: latestItem.name || 'Item', days };
+    } else if (days > 0 && remainingHours > 0) {
+      messageKey = 'notif.reservation_reminder_days_hours';
+      messageVariables = { itemName: latestItem.name || 'Item', days, hours: remainingHours };
+    }
+
     const reservations = await Reservation.find({
       item: latestItem._id,
       status: 'reserved'
@@ -144,8 +175,8 @@ async function send48HourReminders(io) {
           senderId: null,
           type: 'reservation_reminder',
           title: 'Reservation Reminder',
-          messageKey: 'notif.reservation_reminder',
-          messageVariables: { itemName: latestItem.name || 'Item' },
+          messageKey,
+          messageVariables,
           relatedId: latestItem._id,
           relatedWishlistId: wishlistId,
           emitSocketEvent: true,
