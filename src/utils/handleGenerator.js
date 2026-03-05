@@ -34,6 +34,12 @@ async function generateUniqueHandle(fullName, maxAttempts = 100) {
     slug = 'user';
   }
 
+  // Ensure slug has at least 3 characters (handle minlength is 4 including @)
+  // This prevents validation errors for very short names like "as"
+  while (slug.length < 3) {
+    slug += Math.floor(Math.random() * 10).toString();
+  }
+
   // Step 2: Limit slug length (reserve space for numbers and @)
   // Max handle length is 30, we reserve 5 for numbers (4 digits + @ = 5)
   const maxSlugLength = 25;
