@@ -179,6 +179,13 @@ exports.getWishlistById = async (req, res) => {
       });
     }
 
+    if (!wishlist.owner) {
+      return res.status(404).json({
+        success: false,
+        message: 'Wishlist not found'
+      });
+    }
+
     const isOwner = wishlist.owner._id.toString() === viewerId;
 
     // Get all item IDs from this wishlist
@@ -193,6 +200,9 @@ exports.getWishlistById = async (req, res) => {
     // Create a map of itemId -> reservation info for quick lookup
     const reservationMap = new Map();
     reservations.forEach(reservation => {
+      // Skip orphaned reservations (reserver user was deleted)
+      if (!reservation.reserver) return;
+
       const itemId = reservation.item.toString();
       if (!reservationMap.has(itemId)) {
         reservationMap.set(itemId, {
