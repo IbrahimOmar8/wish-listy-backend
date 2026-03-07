@@ -706,7 +706,6 @@ exports.verifyOTP = async (req, res) => {
 
     // Verify OTP (string normalization: trim and compare as strings to avoid number vs string mismatch)
     const storedOtp = String(user.otp || '').trim();
-    const receivedOtp = String(otp ?? '').trim();
     if (storedOtp !== receivedOtp) {
       return res.status(400).json({
         success: false,

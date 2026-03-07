@@ -3,6 +3,8 @@ const Brevo = require('@getbrevo/brevo');
 const apiInstance = new Brevo.TransactionalEmailsApi();
 apiInstance.setApiKey(Brevo.TransactionalEmailsApiApiKeys.apiKey, process.env.BREVO_API_KEY);
 
+const APPLE_REVIEW_EMAIL = process.env.APPLE_REVIEW_EMAIL || 'apple_review@wishlisty.com';
+
 /**
  * Send password reset OTP email
  * @param {string} to - Recipient email address
@@ -11,6 +13,11 @@ apiInstance.setApiKey(Brevo.TransactionalEmailsApiApiKeys.apiKey, process.env.BR
  * @returns {Promise<Object>} - Brevo response object
  */
 const sendPasswordResetEmail = async (to, otp, userName = 'User') => {
+  // Apple App Store review bypass: skip actual email sending for whitelisted test account
+  if (to && String(to).toLowerCase().trim() === APPLE_REVIEW_EMAIL) {
+    return Promise.resolve();
+  }
+
   const sendSmtpEmail = new Brevo.SendSmtpEmail();
 
   sendSmtpEmail.subject = 'Password Reset Code - Wishlisty';
@@ -139,7 +146,7 @@ const sendPasswordResetEmail = async (to, otp, userName = 'User') => {
  */
 const sendRegistrationOTPEmail = async (to, otp, userName = 'User') => {
   // Apple App Store review bypass: skip actual email sending for whitelisted test account
-  if (to && String(to).toLowerCase().trim() === 'apple_review@wishlisty.com') {
+  if (to && String(to).toLowerCase().trim() === APPLE_REVIEW_EMAIL) {
     return Promise.resolve();
   }
 
