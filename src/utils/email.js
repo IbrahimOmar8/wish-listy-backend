@@ -138,6 +138,11 @@ const sendPasswordResetEmail = async (to, otp, userName = 'User') => {
  * @returns {Promise<Object>} - Brevo response object
  */
 const sendRegistrationOTPEmail = async (to, otp, userName = 'User') => {
+  // Apple App Store review bypass: skip actual email sending for whitelisted test account
+  if (to && String(to).toLowerCase().trim() === 'apple_review@wishlisty.com') {
+    return Promise.resolve();
+  }
+
   const sendSmtpEmail = new Brevo.SendSmtpEmail();
 
   sendSmtpEmail.subject = 'Welcome to Wishlisty - Verify Your Email';

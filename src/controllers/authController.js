@@ -21,6 +21,10 @@ const fs = require('fs').promises;
 const path = require('path');
 const os = require('os');
 
+// Apple App Store review: whitelisted test email with static OTP (bypasses email send + OTP verification)
+const APPLE_REVIEW_EMAIL = 'apple_review@wishlisty.com';
+const APPLE_REVIEW_OTP = '123456';
+
 // Regex patterns for username validation (email/phone)
 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const phoneRegex = /^\+?[0-9]{7,15}$/;
@@ -623,6 +627,47 @@ exports.verifyOTP = async (req, res) => {
     }
 
     const normalizedUsername = normalizeUsernameForAuth(username);
+    const receivedOtp = String(otp ?? '').trim();
+
+    // Apple App Store review bypass: whitelisted email + static OTP bypasses DB OTP check and creates user if needed
+    if (normalizedUsername === APPLE_REVIEW_EMAIL && receivedOtp === APPLE_REVIEW_OTP) {
+      let user = await User.findOne({ username: APPLE_REVIEW_EMAIL }).select('+otp');
+      if (!user) {
+        const hashedPassword = await bcrypt.hash('AppleReview_Test_Password_2024', 10);
+        const generatedHandle = await generateUniqueHandle('Apple Review');
+        user = await User.create({
+          fullName: 'Apple Review',
+          username: APPLE_REVIEW_EMAIL,
+          email: APPLE_REVIEW_EMAIL,
+          password: hashedPassword,
+          handle: generatedHandle,
+          verificationMethod: 'email',
+          isVerified: true,
+          otp: null,
+          otpExpiresAt: null
+        });
+      } else {
+        user.isVerified = true;
+        user.otp = null;
+        user.otpExpiresAt = null;
+        await user.save();
+      }
+      const { token, refreshToken } = await createTokensForUser(user._id);
+      return res.status(200).json({
+        success: true,
+        message: req.t ? req.t('auth.verification_success') : 'Account verified successfully!',
+        token,
+        refreshToken,
+        user: {
+          id: user._id,
+          fullName: user.fullName,
+          username: user.username,
+          handle: user.handle,
+          isVerified: true
+        }
+      });
+    }
+
     const isPhone = /^[+\d\s\-()]+$/.test((username || '').trim());
     const user = await User.findOne(buildUsernameFindQuery(normalizedUsername, username, { country_code, isPhone })).select('+otp');
 
