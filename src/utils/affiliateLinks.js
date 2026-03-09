@@ -2,7 +2,7 @@ const axios = require('axios');
 
 const AMAZON_DOMAINS = ['amazon.ae', 'amazon.com', 'amazon.eg', 'amzn.eu', 'amzn.to', 'a.co', 'amzn.eg'];
 const SHORT_AMAZON_DOMAINS = ['amzn.eu', 'amzn.to', 'a.co', 'amzn.eg'];
-const ASIN_PATTERNS = [/\/dp\/([A-Z0-9]{10})/, /\/gp\/product\/([A-Z0-9]{10})/];
+const ASIN_PATTERNS = [/\/dp\/([A-Z0-9]{10})/i, /\/gp\/product\/([A-Z0-9]{10})/i];
 const AFFILIATE_TAG = 'wishlisty-21';
 
 function isAmazonUrl(host) {
@@ -65,13 +65,16 @@ async function expandShortUrl(url) {
     return finalUrl;
   } catch (headErr) {
     const status = headErr.response?.status;
-    if (status === 405 || status === 403 || !headErr.response) {
+    const shouldTryGet = [403, 404, 405].includes(status) || !headErr.response;
+    if (shouldTryGet) {
+      console.log('[affiliateLinks] HEAD failed, trying GET fallback. status:', status, 'url:', url);
       try {
         const getRes = await axios.get(url, {
           ...opts,
           maxContentLength: 5000
         });
         const finalUrl = getRes.request?.res?.responseUrl || getRes.request?.responseURL || url;
+        console.log('[affiliateLinks] GET fallback succeeded. responseUrl:', finalUrl);
         return finalUrl;
       } catch {
         return null;
@@ -109,11 +112,15 @@ async function convertToAffiliateLink(url) {
     if (asin) {
       const domain = extractAmazonDomain(workingUrl);
       if (domain) {
-        return `https://${domain}/dp/${asin}?tag=${AFFILIATE_TAG}`;
+        const result = `https://${domain}/dp/${asin}?tag=${AFFILIATE_TAG}`;
+        console.log('[affiliateLinks] convertToAffiliateLink result (cleaned):', result);
+        return result;
       }
     }
 
-    return addTagToUrl(workingUrl);
+    const result = addTagToUrl(workingUrl);
+    console.log('[affiliateLinks] convertToAffiliateLink result (fallback):', result);
+    return result;
   } catch {
     return url;
   }
