@@ -27,6 +27,7 @@
   "dependencies": {
     "@getbrevo/brevo": "^3.0.1",
     "@nestjs/swagger": "^11.2.0",
+    "axios": "^1.13.6",
     "bcryptjs": "^2.4.3",
     "cloudinary": "^1.40.0",
     "cors": "^2.8.5",

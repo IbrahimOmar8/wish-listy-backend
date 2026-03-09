@@ -2,6 +2,7 @@ const Item = require('../models/Item');
 const Wishlist = require('../models/Wishlist');
 const Reservation = require('../models/Reservation');
 const { createNotification } = require('../utils/notificationHelper');
+const { convertToAffiliateLink } = require('../utils/affiliateLinks');
 const mongoose = require('mongoose');
 
 exports.addItem = async (req, res) => {
@@ -39,13 +40,15 @@ exports.addItem = async (req, res) => {
       });
     }
 
+    const processedUrl = await convertToAffiliateLink(url || null);
+
     // Create item with proper field mapping
     const item = await Item.create({
       name: name.trim(),
       description: description ? description.trim() : null,
       wishlist: wishlistId,
       priority: priority || 'medium',
-      url: url || null,
+      url: processedUrl,
       storeName: storeName || null,
       storeLocation: storeLocation || null,
       notes: notes || null
@@ -363,6 +366,10 @@ exports.updateItem = async (req, res) => {
         filteredUpdates[field] = updates[field];
       }
     });
+
+    if (filteredUpdates.url !== undefined) {
+      filteredUpdates.url = await convertToAffiliateLink(filteredUpdates.url);
+    }
 
     // First, fetch item with wishlist to check ownership
     const item = await Item.findById(id).populate({

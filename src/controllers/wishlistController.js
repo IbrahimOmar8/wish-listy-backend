@@ -1,6 +1,7 @@
 const Wishlist = require('../models/Wishlist');
 const Item = require('../models/Item');
 const Reservation = require('../models/Reservation');
+const { convertToAffiliateLink } = require('../utils/affiliateLinks');
 const mongoose = require('mongoose');
 
 exports.createWishlist = async (req, res) => {
@@ -59,12 +60,13 @@ exports.createWishlist = async (req, res) => {
 
         // Create items within transaction
         for (const itemData of items) {
+          const processedUrl = await convertToAffiliateLink(itemData.url || null);
           const item = await Item.create([{
             name: itemData.name.trim(),
             description: itemData.description ? itemData.description.trim() : null,
             wishlist: createdWishlist._id,
             priority: itemData.priority || 'medium',
-            url: itemData.url || null,
+            url: processedUrl,
             storeName: itemData.storeName || null,
             storeLocation: itemData.storeLocation || null
           }], { session });

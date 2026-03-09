@@ -1,5 +1,4 @@
 const mongoose = require('mongoose');
-const { convertToAffiliateLink } = require('../utils/affiliateLinks');
 
 const itemSchema = new mongoose.Schema({
   name: {
@@ -15,8 +14,7 @@ const itemSchema = new mongoose.Schema({
   url: {
     type: String,
     trim: true,
-    default: null,
-    set: (v) => (!v ? null : convertToAffiliateLink(String(v).trim()) || null)
+    default: null
   },
   storeName: {
     type: String,
